@@ -1,0 +1,257 @@
+import numpy as np
+from scipy.spatial.transform import Rotation as R
+
+def part1_inverse_kinematics_CCD(meta_data, joint_positions, joint_orientations, target_pose):
+
+    joint_names = meta_data.joint_name
+    joint_parent = meta_data.joint_parent
+
+    def quaternionMultiply(r1, r2):
+        return (R.from_quat(r1) * R.from_quat(r2)).as_quat()
+
+    def getJointOffsets():
+        joint_offsets = np.empty(joint_positions.shape)
+        for i in range(len(joint_names)):
+            if joint_parent[i] == -1:
+                joint_offsets[i] = np.array([0.0, 0.0, 0.0])
+            else:
+                joint_offsets[i] = joint_positions[i] - joint_positions[joint_parent[i]]
+
+        return joint_offsets
+    
+    def getJointRoation():
+        joint_rotations = np.empty(joint_orientations.shape)
+        for i in range(len(joint_names)):
+            if joint_parent[i] == -1:
+                joint_rotations[i] = R.from_euler('XYZ', [0.,0.,0.]).as_quat()
+            else:
+                joint_rotations[i] = (R.from_quat(joint_orientations[joint_parent[i]]).inv() * R.from_quat(joint_orientations[i])).as_quat()
+
+        return joint_rotations
+    
+    def normalizeVector(vector):
+        return vector / np.linalg.norm(vector)
+
+    path, path_name, path1, path2 = meta_data.get_path_from_root_to_end()
+    joint_offsets = getJointOffsets()
+    joint_rotations = getJointRoation()
+
+    rotation_chain = np.empty((len(path),), dtype=object)
+    position_chain = np.empty((len(path), 3))
+    orientation_chain = np.empty((len(path),), dtype=object)
+    offset_chain = np.empty((len(path), 3))
+
+    for i in range(0, len(path)):
+        index = path[i]
+        position_chain[i] = joint_positions[index]
+        orientation_chain[i] = R.from_quat(joint_orientations[index]) #end 可能需要看看
+        if index in path2 and index != 0:
+            offset_chain[i] = -joint_offsets[index]
+            rotation_chain[i] = (R.from_quat(joint_rotations[index]).inv())
+        else:
+            offset_chain[i] = joint_offsets[index]
+            rotation_chain[i] = (R.from_quat(joint_rotations[index]))
+
+    #CCD IK
+    cycle_count = 0
+    while cycle_count < 10 and np.linalg.norm(position_chain[-1]- target_pose) > 1e-2: #不知道取平方和计算会少吗？
+        for i in range(len(path) - 2, len(path) - 2 - len(path2), -1):
+            #calculate rotation
+            parent_target_vector_unit = normalizeVector(target_pose - position_chain[i])
+            offset_vector_unit = normalizeVector(position_chain[-1] - position_chain[i])
+            rotate_angle = np.arccos(np.dot(parent_target_vector_unit, offset_vector_unit))
+            rotate_Axis_unit = np.cross(offset_vector_unit, parent_target_vector_unit)
+            rotation = R.from_rotvec(rotate_angle * rotate_Axis_unit, degrees = False)
+
+            #update parent joint world/local rotation
+            orientation_chain[i] = rotation * orientation_chain[i]
+            rotation_chain[i] = orientation_chain[i - 1].inv() * orientation_chain[i]
+
+            #update children joints
+            for j in range(i, len(path) - 1):
+                orientation_chain[j + 1] = orientation_chain[j] * rotation_chain[j + 1]
+                position_chain[j + 1] = orientation_chain[j].apply(offset_chain[j + 1]) + position_chain[j]
+            
+        for i in range(1, len(path2) - 1):
+            #calculate rotation
+            parent_target_vector_unit = normalizeVector(target_pose - position_chain[i])
+            offset_vector_unit = normalizeVector(position_chain[-1] - position_chain[i])
+            rotate_angle = np.arccos(np.dot(parent_target_vector_unit, offset_vector_unit))
+            rotate_Axis_unit = np.cross(offset_vector_unit, parent_target_vector_unit)
+            rotation = (R.from_rotvec(rotate_angle * rotate_Axis_unit, degrees = False))
+
+            #update parent joint world/local rotation
+            orientation_chain[i + 1] = rotation * orientation_chain[i + 1]
+            position_chain[i + 1] = position_chain[i] - orientation_chain[i + 1].apply(-offset_chain[i])
+            rotation_chain[i + 1] = orientation_chain[i].inv() * orientation_chain[i + 1]
+
+            #update children joints
+            for j in range(i + 1, len(path2)):
+                orientation_chain[j + 1] = orientation_chain[j] * rotation_chain[j + 1]
+                position_chain[j + 1] = position_chain[j] - orientation_chain[j + 1].apply(-offset_chain[j])
+            for j in range(len(path2) - 1, len(path) - 1):
+                index = path[j]
+                if index != 0:
+                    orientation_chain[j] = orientation_chain[j - 1] * rotation_chain[j] 
+                position_chain[j + 1] = position_chain[j] + orientation_chain[j].apply(offset_chain[j + 1])
+                print(offset_chain[j - 1])
+        cycle_count += 1
+
+    for i in range(0, len(path)):
+        index = path[i]
+        joint_positions[index] = position_chain[i]
+        if index in path2 and index != 0:
+            joint_orientations[index] = (orientation_chain[i]).as_quat()
+        else:
+            joint_orientations[index] = (orientation_chain[i]).as_quat()
+
+    # if joint_parent.index(-1) in path:
+    #     root_index = path.index(joint_parent.index(-1))
+    #     if root_index != 0:
+    #         joint_orientations[0] = orientation_chain[root_index].as_quat()
+    #         joint_positions[0] = position_chain[root_index]
+
+    for i in range(0, len(meta_data.joint_name)):
+        if i not in path:
+            parent_index = meta_data.joint_parent[i]
+            rotation = joint_orientations[parent_index]
+            offset = meta_data.joint_initial_position[i] - meta_data.joint_initial_position[parent_index]
+            joint_positions[i] = joint_positions[parent_index] + R.from_quat(rotation).apply(offset)
+            joint_orientations[i] = quaternionMultiply(rotation, joint_rotations[i])
+
+    return joint_positions, joint_orientations
+
+def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, target_pose):
+
+    joint_names = meta_data.joint_name
+    joint_parent = meta_data.joint_parent
+
+    def quaternionMultiply(r1, r2):
+        return (R.from_quat(r1) * R.from_quat(r2)).as_quat()
+
+    def getJointOffsets():
+        joint_offsets = np.empty(joint_positions.shape)
+        for i in range(len(joint_names)):
+            if joint_parent[i] == -1:
+                joint_offsets[i] = np.array([0.0, 0.0, 0.0])
+            else:
+                joint_offsets[i] = joint_positions[i] - joint_positions[joint_parent[i]]
+
+        return joint_offsets
+    
+    def getJointRoation():
+        joint_rotations = np.empty(joint_orientations.shape)
+        for i in range(len(joint_names)):
+            if joint_parent[i] == -1:
+                joint_rotations[i] = R.from_euler('XYZ', [0.,0.,0.]).as_quat()
+            else:
+                joint_rotations[i] = (R.from_quat(joint_orientations[joint_parent[i]]).inv() * R.from_quat(joint_orientations[i])).as_quat()
+
+        return joint_rotations
+    
+    def normalizeVector(vector):
+        return vector / np.linalg.norm(vector)
+
+    path, path_name, path1, path2 = meta_data.get_path_from_root_to_end()
+    joint_offsets = getJointOffsets()
+    joint_rotations = getJointRoation()
+
+    rotation_chain = np.empty((len(path),), dtype=object)
+    position_chain = np.empty((len(path), 3))
+    orientation_chain = np.empty((len(path),), dtype=object)
+    offset_chain = np.empty((len(path), 3))
+
+    for i in range(0, len(path)):
+        index = path[i]
+        position_chain[i] = joint_positions[index]
+        orientation_chain[i] = R.from_quat(joint_orientations[index]) #end 可能需要看看
+        if index in path2 and index != 0:
+            offset_chain[i] = -joint_offsets[index]
+            rotation_chain[i] = (R.from_quat(joint_rotations[index]).inv())
+        else:
+            offset_chain[i] = joint_offsets[index]
+            rotation_chain[i] = (R.from_quat(joint_rotations[index]))
+
+    #Jocabian IK
+    cycle_count = 0
+    alpha = 16
+    while cycle_count < 1 and np.linalg.norm(position_chain[-1]- target_pose) > 1e-2: #不知道取平方和计算会少吗？
+        joint_angle = []
+        for r in range(0, len(path)):
+            eula = R.from_matrix(rotation_chain[r].as_matrix()).as_euler('XYZ', degrees=True)
+            joint_angle.append(eula)
+        #Comoute Jocabian IK
+        jacobian = []
+        for i in range(0, len(path)):
+            current_end_distance = position_chain[i]  - position_chain[-1]
+            current_target_distance = target_pose - position_chain[i]
+            rotation_axis =  np.cross(current_end_distance, current_target_distance)
+            rotation_axis_unit = rotation_axis / np.linalg.norm(rotation_axis)
+            axis_x = np.array([rotation_axis_unit[0], 0., 0.]).reshape(-1, 3)
+            axis_y = np.array([0, rotation_axis_unit[1], 0.]).reshape(-1, 3)
+            axis_z = np.array([0, 0., rotation_axis_unit[2]]).reshape(-1, 3)
+            jacobian.append(np.cross(axis_x, current_end_distance))
+            jacobian.append(np.cross(axis_y, current_end_distance))
+            jacobian.append(np.cross(axis_z, current_end_distance))
+            print(current_end_distance)
+        jacobian = np.concatenate(jacobian, axis=0).transpose()
+        delta =  np.array(target_pose  - position_chain[-1]).reshape(3, -1)
+        theta = np.concatenate(joint_angle, axis=0).transpose().reshape(-1, 1) 
+        theta = theta - alpha * np.dot(jacobian.transpose(), delta)
+
+        rotation = []
+        theta = theta.reshape(-1, 3)
+        for i in range(len(theta)):
+            rotation.append(R.from_euler('XYZ', theta[i], degrees= True))
+        for i in range(0, len(path) - 1):
+            position_chain[i + 1] = position_chain[i] + orientation_chain[i].apply(offset_chain[i + 1])
+            for j in range(i + 1, len(path) - 1):
+                if j + 1 == len(path) - 1:
+                    orientation_chain[j + 1] = orientation_chain[j]
+                else:
+                    orientation_chain[j + 1] = orientation_chain[j] * rotation[j + 1]
+            
+        cycle_count += 1
+
+    for i in range(0, len(path)):
+        index = path[i]
+        joint_positions[index] = position_chain[i]
+        if index in path2 and index != 0:
+            joint_orientations[index] = (orientation_chain[i]).as_quat()
+        else:
+            joint_orientations[index] = (orientation_chain[i]).as_quat()
+
+    # if joint_parent.index(-1) in path:
+    #     root_index = path.index(joint_parent.index(-1))
+    #     if root_index != 0:
+    #         joint_orientations[0] = orientation_chain[root_index].as_quat()
+    #         joint_positions[0] = position_chain[root_index]
+
+    for i in range(0, len(meta_data.joint_name)):
+        if i not in path:
+            parent_index = meta_data.joint_parent[i]
+            rotation = joint_orientations[parent_index]
+            offset = meta_data.joint_initial_position[i] - meta_data.joint_initial_position[parent_index]
+            joint_positions[i] = joint_positions[parent_index] + R.from_quat(rotation).apply(offset)
+            joint_orientations[i] = quaternionMultiply(rotation, joint_rotations[i])
+
+    return joint_positions, joint_orientations
+    
+        
+
+
+
+
+def part2_inverse_kinematics(meta_data, joint_positions, joint_orientations, relative_x, relative_z, target_height):
+    """
+    输入lWrist相对于RootJoint前进方向的xz偏移，以及目标高度，IK以外的部分与bvh一致
+    """
+    
+    return joint_positions, joint_orientations
+
+def bonus_inverse_kinematics(meta_data, joint_positions, joint_orientations, left_target_pose, right_target_pose):
+    """
+    输入左手和右手的目标位置，固定左脚，完成函数，计算逆运动学
+    """
+    
+    return joint_positions, joint_orientations

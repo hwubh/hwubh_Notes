@@ -1,0 +1,88 @@
+- Reflection: 
+- Assembly： 程序集以 .exe 或 .dll 文件的形式实现（PE格式） ![20240508210000](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240508210000.png)
+  - Assembly and Namespace ： https://github.com/hnscdg/gitbook/issues/17
+  - 命名空间用于对类型进行逻辑分组。程序集则是程序的物理分组，对应于一个dll或exe文件
+  - ![20240508210908](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240508210908.png)
+  - ![20240508211240](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240508211240.png)
+  - 命名空间的设计目的是提供一种让一组名称与其他名称分隔开的方式。在一个命名空间中声明的类的名称与另一个命名空间中声明的相同的类的名称不冲突。
+  - PE：PE头、CLR头、元数据和IL代码；https://www.cnblogs.com/vvjiang/p/5229545.html
+- 装箱 (boxing)：值类型实例到对象的转换。 拆箱（Unboxing）：将引用类型转换为值类型。存在着从栈到堆的互指以及堆内存的开辟
+- Collections：https://blog.csdn.net/qiaoquan3/article/details/51380992
+  - Array：   
+    - 所有的数组都是由连续的内存位置组成的。最低的地址对应第一个元素，最高的地址对应最后一个元素。
+    - 数组的内容都是相同类型。
+    - 数组可以直接通过下标访问。
+    - 必须指定其长度
+  - ArrayList：
+    - 解决了数组创建时必须指定长度以及只能存放相同类型的缺点
+    - 不是类型安全的
+    - 以Object类型进行存储需要boxing unboxing
+    - 插入，删除时需要移动其后的所有元素
+    - 动态扩容
+  - List< T >:
+    - 类型安全，需要指明类型
+    - 内部使用Array储存
+  - LinkedList< T >
+    - 内存存储的排序上可能是不连续的, 不能通过下标来访问 
+    - 向链表中插入或删除节点无需调整结构容量，且方便
+    - 访问需遍历
+  - Queue< T >
+    - 先进先出
+    - 默认初始容量为32，增长因子为2.0
+    - 底层Array，循环数组
+  - Stack< T >
+    - 后进先出
+    - 默认容量为10
+    - 同Queue/
+  - Dictionary< K,T>
+    - 增加、删除、访问快
+    - 空间占用大，buckets的长度就是字典的真实长度, buckets中的每个元素都是一个链表
+    - 数组 + 单项链表
+    - ![20240605130119](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240605130119.png)
+  - Hashtable
+    - Key，Value皆为Object
+  - 循环数组：指向队尾的指针可以动过（mod 数组的长度来回到初始位置），同时用(tail+1)%array.length=head 来判断空间是否队满（牺牲了一个元素的位置）。https://cloud.tencent.com/developer/article/1013597
+- Class vs Struct：
+  - ![20240508212409](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240508212409.png)
+  - ![20240508212423](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240508212423.png)
+- enum： 值类型
+- 多态：静态：函数/运算符（public static）重载；动态：抽象/虚方法
+- Interface： 
+  - 类+接口 替换 多重继承（C# 不支持多重继承，但可以继承多个接口）：将功能和特性抽象出来，各个功能作为一个接口。从特性和功能出发，代替继承的思路
+  - 接口内不能定义字段，只能定义属性
+  - 接口定义了属性、方法和事件，这些都是接口的成员。接口只包含了成员的声明。成员的定义是派生类的责任。
+  - 与abstract class 类似![20240508220337](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240508220337.png)
+- 预处理器指令指导编译器在实际编译开始之前对信息进行预处理。
+- Throw：需要嵌套![20240508221250](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240508221250.png)。否则会重置抛出点（异常堆栈的记录被重置）
+- System.IO：文本读写：StreamReader 和 StreamWriter。； 二进制读写：BinaryReader 和 BinaryWriter
+- MetaData：https://zhuanlan.zhihu.com/p/35177627 
+  - Type，Attribute，Property
+  - 描述数据的数据：描述了类型、方法、属性![20240513164824](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240513164824.png)
+- Attribute：
+  - 编译时：编译器读到那些标记（eg：MethodImpl）的时候会有一些事先决定好的行为
+  - 运行时：用于反射：注解就是在不破坏原有代码的情况下，在代码的元数据上附加一些信息
+  - 声明、构建：![20240515172757](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240515172757.png)
+- Reflection：反射是程序正在运行时，可以查看自身或者其他程序集元数据的行为。https://www.runoob.com/csharp/csharp-reflection.html
+  - 可以获取message、member、.ctor、field、method； 修改字段，使用方法；将 Type 对象快速实例化成一个对象（Activator）
+  - 手游中少用：性能、未引用时被裁剪
+- Property：
+- Indexer：允许一个对象可以像数组一样使用下标的方式来访问
+  - 索引器（Indexer）可被重载。索引器声明的时候也可带有多个参数，且每个参数可以是不同的类型。没有必要让索引器必须是整型的。
+- Delegate：是存有对某个方法的引用的一种引用类型变量
+  - Multicasting ：可以用“+”，“-”来合并，移除委托对象
+  - Acition：无返回值的泛型委托；Func：有返回值的泛型委托
+  - 回调函数就是允许用户把需要调用的方法的指针作为参数传递给一个函数
+- Event：一个用户操作或一些提示信息；用于实现 *事件驱动模式*
+  - https://blog.csdn.net/qq_35587645/article/details/106628990?spm=1001.2101.3001.6650.1&utm_medium=distribute.pc_relevant.none-task-blog-2%7Edefault%7ECTRLIST%7ERate-1-106628990-blog-129772271.235%5Ev43%5Epc_blog_bottom_relevance_base5&depth_1-utm_source=distribute.pc_relevant.none-task-blog-2%7Edefault%7ECTRLIST%7ERate-1-106628990-blog-129772271.235%5Ev43%5Epc_blog_bottom_relevance_base5&utm_relevant_index=2
+  - 使用事件机制实现线程间的通信
+  - 发布器（publisher） 是一个包含事件和委托定义的对象
+  - 订阅器（subscriber） 是一个接受事件并提供事件处理程序的对象
+  - 只能有+=/-=，事件不能被随意覆盖，相比于多播的委托更安全
+- GC：C# VS IL2CPP
+- Where：指定类型约束
+  - 接口约束；基类约束；构造函数约束（new）；函数约束
+- 协程：https://www.cnblogs.com/unity3ds/p/10993374.html
+- Unity SendMessage
+
+- AutoResetEvent vs ManualResetEvent: https://www.cnblogs.com/chenwolong/p/AutoResetEvent.html
+- process kill/ close: https://stackoverflow.com/questions/13952635/what-are-the-differences-between-kill-process-and-close-process

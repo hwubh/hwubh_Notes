@@ -1,0 +1,33 @@
+- Representations of 3D rotation:
+  - [回] Rotation matrices
+    ![20240507174100](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240507174100.png)
+  - [囘] Euler angles： 
+    - conversion： Local xyz or world xyz
+    - Gimbal Lock： e.g.: 当物体按照绕X，y, z的顺序旋转时，若位于中间的y的旋转为$\pi$/2时，会存在变换后的X轴与变换前的Z轴重合的问题。导致 (20.90,0) = (0,90,20)的情况出现，即一个变换对应多种表示的欧拉角。
+    - ![20240507182217](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240507182217.png)
+  - [囬] Rotation vectors/Axis angles
+    - ![20240507182430](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240507182430.png)
+  - [𡇌] Quaternions
+    - Euler's formula：![20240507183145](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240507183145.png)
+    - ![20240528200301](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240528200301.png)
+    - Pure Quaternion: a quaternion only contains **Imaginary Quantity**![20240528200506](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240528200506.png)
+    - conjugate: q<sup>*</sup> = [s, - $ \vec{v} $]
+      - 求 $q^{-1}$ : $ {qq^* =  [𝑠^2 + \vec{v}·\vec{v}, 0] =\lVert q \rVert^2}$, then we get $ q^{-1} = \frac{q^*}{\lVert q \rVert^2}$
+    - 3D旋转公式：
+      - for $\vec{v}_{\perp}$ :![20240528203629](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240528203629.png)，其中“*q*” 为一个单位四元数（模长为1），它所代表的变换并不会对原向量进行缩放，是一次纯旋转
+      - for $\vec{v}_{\lvert\rvert}$: $\vec{v}^{'}_{\lvert\rvert} =  \vec{v}_{\lvert\rvert}$
+      - Then we get: $\vec{v}^{'} = \vec{v}_{\lvert\rvert} + q\vec{v}_{\perp}$, as ![20240528205726](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240528205726.png), then ![20240528205750](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240528205750.png), 
+      then we have $\vec{v}^{'} = \vec{v}_{\lvert\rvert} + p^2\vec{v}_{\perp}= p \vec{v}p^{*}$
+    - Interpolation:
+      - Lerp: Path is a chord![20240606211747](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240606211747.png)
+      - (Normalized)Nlerp: path is a arc, angular velocity is not constant: ![20240606212250](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240606212250.png)
+      - (Spherical)Slerp: Interpolate the angle:![20240606212620](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240606212620.png)
+      - In pratice, considering the consumption of angle formula, sometimes Nlerp is used to replace Slerp, when rotation angle is small or $sin(\theta) \approx 0.0$
+      - Double Cover
+
+- How to rotate a vectors：Rodrigues' rotation formula
+  - 推导：https://blog.csdn.net/qq_69110426/article/details/134297405：
+  - ![20240523002130](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240523002130.png)
+  - $$\lVert \vec{v} \times \vec{k} \rVert = \lVert \vec{v}_{\perp} \times \vec{k} \rVert = \lVert \vec{v}_{\perp} \rVert = \lVert \vec{v}_{rot\perp} \rVert $$
+  - ![20240523005637](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240523005637.png)
+  - $$ t = (1-cos\theta)\vec{u} \times \left( \vec{u} \times \vec{a} \right) = (1-cos\theta) (-\vec{a}_{\perp})$$
