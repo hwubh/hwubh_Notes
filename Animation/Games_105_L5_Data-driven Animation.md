@@ -1,0 +1,13 @@
+- Data-driven Character Animation
+  - Motion Capture (Mocap): Digitally recording movements
+    - Types: 
+      - Rotoscoping
+      - Mechanical Mocap: Exoskeleton
+      - Inertial Mocap: Inertial Measurement Unit (IMU); Accelerometers (3dof) + axis gyroscope (3dof)
+      - Optical Mocap: Reflective/light-emitting markers; Multi-view geometry;Solve body motions based on marker positions
+      - Markerless Mocap: put camera in different views.
+      - Motion Estimation: Monocular / stereo(Sparse Sensor?)
+  - Motion Synthesis:
+    - Motion retargeting: Retarget a motion to a character with diff bones/ bone names/ reference pose/ bone ratios/ skeletal structure
+    - Motion transition
+    - Motion graph

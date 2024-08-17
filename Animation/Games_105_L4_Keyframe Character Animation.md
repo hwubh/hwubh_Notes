@@ -28,11 +28,38 @@
           - cons：
             - No local control: 每个节点都会影响整体曲线。
             - Computationally expensive: 当N（节点数）多时计算量大
-        - Cubic Bezier Curves: 三次的Bezier曲线由四个控制点控制。
-          - 
-        - Cubic basis spline(B-Splines): 基于n次B样条基函数。是bezier曲线的一般化。
+        - Cubic Bezier Curves: 三次的Bezier曲线由四个控制点控制，根据t线性插值，通过递归实现。
+          - ![20240817150241](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240817150241.png)
+          - formula:![20240817150557](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240817150557.png)
+            - $B_i^{n}(t)$ 被称为伯恩斯坦基函数*Bernstein basis function*， 从这个式子可以看出K次的贝塞尔曲线实际上可以被是为**一段k多项次式曲线**
+            - 从 ![20240817162806](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240817162806.png) 可以推导得到 ![20240817162639](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240817162639.png) 
+          - Cons:
+            - 移动单个顶点影响全局的曲线。
+        - Cubic basis spline(B-Splines): 基于n次B样条基函数。是bezier曲线的一般化。（可以看作是一段段bezier曲线拼成的?）
+          - Knots（节点），Degree（阶数），Control Vertex（CV, 控制点）：
+            - Degree： 多项式系数的最高次幂。物理上可以视为*曲线的一段跨距内（起点和终点之间），最大可弯曲的次数*
+            - Knot：区段间交接的部分；（节点划分影响到权重计算，实现局部性影响的原理应该是在生成某区间内的点时，某些控制点前的权重值会为0，即对该点没有贡献？）
+            - CV: 控制曲线的点,于曲线之外;B样条多项式的阶数可独立于控制点数目;当 n = k+1时即为bezier曲线，一般需要大于k+1； 
+              - 控制点的权值：控制点对曲线或曲面的牵引力；权值越高，曲线或曲面会越接近控制点。本质上是改变了该控制点前面的系数。
+            - 定义域被节点细分，分成多个节点区间（*knots span*）
+            - 每个基函数局部非零
+            - 基函数的次数认为给定
+            - 对于定义域$[u_0, u_m]$, 存在m+1个节点$u_0$ ~ $u_m$ 将区间分为m个*节点区间*, 而根据节点间距还可分为 **均匀B样条**（节点等间距） 和 **准均匀B样条**（中间节点等间距，两端节点具有重复度k（阶数）。 即最前k个，最后k个的节点区间=0， 其中前k+1个节点=0， 后k+1个节点=1） 
+            - 均匀B样条不会经过首尾两个控制点：Periodic；非均匀样条：经过首尾：
+          - formula：![![20240817152342](httpsraw.githubusercontent.comhwubhTemp-Picsmain20240817152342.png)](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/!%5B20240817152342%5D(httpsraw.githubusercontent.comhwubhTemp-Picsmain20240817152342.png).png)![20240817154039](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240817154039.png)
+            - 每个区间内的基函数 $B_{i,k}(u)$ 是由 最多k+1个非零k次基函数组成的 k次非零多项式。？
+          - B-spline拟合：在局部区间[a,b]上，选择节点数为m，则确定了个m-1节点区间，一共有个(k+m-1)次数为k的B样条基函数。![20240817153533](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240817153533.png)
+            - 其中B样条基函数($B_{i,k}(u)$)作为加权系数，对控制顶点($P_i$)进行线性组合所构建的曲线。
+            - K阶B样条影响k个区间，k+1个节点。—>所以控制点只有局部影响，相当于对其他区间的权重为0.？
+            - e.g.: n=5， k=3 的情况，就是5个控制点，3阶2次函数，（5+3）个区间，（5+3+1）个节点。？!
           - Pros: 
             - local control： 曲线位于控制多边形的凸包内，控制顶点只影响局部的多项式曲线。 曲线的阶数与控制点的数量解耦。
             - 特征多边形更逼近以及多项式阶次较低
+          - NURBS： nouniform rational BSpline：![20240817160251](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240817160251.png) 添加权重*w*, 代表各控制点对特定拟合点的影响权重。
+            - rational： 曲线上控制点的「weight」是否相等；若不相等= 有理![v2-85896b0f81eb594f2380dc382f13babd_r](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/v2-85896b0f81eb594f2380dc382f13babd_r.jpg)
+            - Non-Uniform：曲线「节点的差异值」是否相同；（例如过首尾控制的就是不均匀的，因为首尾k个区间与其他的区间不同？）
           - Cubic Hermite: 每个全局考虑前后两点的取值，以及他们的一阶导数值。使用这四个点作为控制点。
-          - Catmull-Rom spline
+            - Hermite Basis Functions: ![20240817163147](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240817163147.png)
+          - Catmull-Rom spline : 每段曲线由四个控制点控制，需要满足![20240817163633](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240817163633.png)， $\alpha$ 为0~1的参数，用于控制尾部与控制点之间的平行程度（一般为0.5） ![20240817163421](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240817163421.png)
+        - https://zhuanlan.zhihu.com/p/539808761； https://zhuanlan.zhihu.com/p/587486358；https://zhuanlan.zhihu.com/p/672199076；https://zhuanlan.zhihu.com/p/500426271；https://zhuanlan.zhihu.com/p/539477988；https://zhuanlan.zhihu.com/p/72597162；https://zhuanlan.zhihu.com/p/72595018；https://zhuanlan.zhihu.com/p/622969285；https://zhuanlan.zhihu.com/p/213469370；https://www.cs.cmu.edu/afs/cs/academic/class/15462-s10/www/lec-slides/lec06.pdf；https://www.cubic.org/docs/hermite.htm；https://zhuanlan.zhihu.com/p/111708587
+      - Interpolation: ![20240817164148](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240817164148.png) ![20240817164210](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240817164210.png) -> constant rotational speed.
