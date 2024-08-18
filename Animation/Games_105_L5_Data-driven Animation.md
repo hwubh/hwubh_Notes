@@ -9,5 +9,9 @@
       - Motion Estimation: Monocular / stereo(Sparse Sensor?)
   - Motion Synthesis:
     - Motion retargeting: Retarget a motion to a character with diff bones/ bone names/ reference pose/ bone ratios/ skeletal structure
+      - Pipeline: map bone names -> scale translations -> fix reference pose -> fix IK (Foot-skating(滑步，模型平移)， Self penetration(穿模？？))
+      - Rig: 由骨骼（Bones）和控制器（Controllers）组成的一个结构，它决定了如何操纵和变形模型。通常包含骨骼，骨骼权重，控制器和约束。https://zhuanlan.zhihu.com/p/591982020 https://dev.epicgames.com/documentation/en-us/unreal-engine/ik-rig-in-unreal-engine https://zhuanlan.zhihu.com/p/353524801
+        - UE中，Rig即是一套创建/操控动画的系统。也是一种资源类型，用于绑定模型编辑，骨骼约束。只有声明为同一个Rig，才可以重定向。？？
+        - Control Rig： 
     - Motion transition
     - Motion graph
