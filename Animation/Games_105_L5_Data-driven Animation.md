@@ -18,6 +18,11 @@
             - 动画蓝图中通过ControlRig节点修饰动画：引入ControlRig节点，将功能模块化？
             - 程序化动画： 纯程序化机械角色动画和物理模拟动画
           - Control Rig, Sequencer, 动画序列（animation sequence）：
-            - control rig：
+            - control rig：实时的绑定系统, 基于蓝图，通过控制属性为角色添加动画
+            - Sequencer是用来做场景动画的组织
+            - 动画序列用来存储骨骼动画数据
+            - 引擎中创建动画，可以Control Rig + Sequencer来创作动画序列
+          - Control Rig vs 动画蓝图
+            - Anim BP是动画逻辑脚本，Rig Graph是骨架约束脚本；一个是Controller，一个是Component。
     - Motion transition
     - Motion graph
