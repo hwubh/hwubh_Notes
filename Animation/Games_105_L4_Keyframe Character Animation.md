@@ -63,3 +63,6 @@
           - Catmull-Rom spline : 每段曲线由四个控制点控制，需要满足![20240817163633](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240817163633.png)， $\alpha$ 为0~1的参数，用于控制尾部与控制点之间的平行程度（一般为0.5） ![20240817163421](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240817163421.png)
         - https://zhuanlan.zhihu.com/p/539808761； https://zhuanlan.zhihu.com/p/587486358；https://zhuanlan.zhihu.com/p/672199076；https://zhuanlan.zhihu.com/p/500426271；https://zhuanlan.zhihu.com/p/539477988；https://zhuanlan.zhihu.com/p/72597162；https://zhuanlan.zhihu.com/p/72595018；https://zhuanlan.zhihu.com/p/622969285；https://zhuanlan.zhihu.com/p/213469370；https://www.cs.cmu.edu/afs/cs/academic/class/15462-s10/www/lec-slides/lec06.pdf；https://www.cubic.org/docs/hermite.htm；https://zhuanlan.zhihu.com/p/111708587
       - Interpolation: ![20240817164148](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240817164148.png) ![20240817164210](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240817164210.png) -> constant rotational speed.
+
+- ref: https://nrsyed.com/2017/12/10/inverse-kinematics-using-the-jacobian-inverse-part-2/
+- https://medium.com/unity3danimation/overview-of-jacobian-ik-a33939639ab2

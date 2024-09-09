@@ -9,7 +9,7 @@
       - Motion Estimation: Monocular / stereo(Sparse Sensor?)
   - Motion Synthesis:
     - Motion retargeting: Retarget a motion to a character with diff bones/ bone names/ reference pose/ bone ratios/ skeletal structure
-      - Pipeline: map bone names -> scale translations -> fix reference pose -> fix IK (Foot-skating(滑步，模型平移)， Self penetration(穿模？？))
+      - Pipeline: map bone names -> scale translations -> fix reference pose -> fix IK (Foot-skating(滑步，模型平移)， Self penetration(穿模？？)) 
       - Rig: 由骨骼（Bones）和控制器（Controllers）组成的一个结构，它决定了如何操纵和变形模型。通常包含骨骼，骨骼权重，控制器和约束。https://zhuanlan.zhihu.com/p/591982020 https://dev.epicgames.com/documentation/en-us/unreal-engine/ik-rig-in-unreal-engine https://zhuanlan.zhihu.com/p/353524801
         - UE中，Rig即是一套创建/操控动画的系统。也是一种资源类型，用于绑定模型编辑，骨骼约束。只有声明为同一个Rig，才可以重定向。？？
         - Control Rig： a suite of animation tools for you to rig and animate characters, bypassing using external DCC tools. ![v2-9f04539dca0d2ba64f1fff85088e8130_r](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/v2-9f04539dca0d2ba64f1fff85088e8130_r.jpg)
@@ -23,6 +23,40 @@
             - 动画序列用来存储骨骼动画数据
             - 引擎中创建动画，可以Control Rig + Sequencer来创作动画序列
           - Control Rig vs 动画蓝图
-            - Anim BP是动画逻辑脚本，Rig Graph是骨架约束脚本；一个是Controller，一个是Component。
-    - Motion transition
-    - Motion graph
+            - Anim BP是动画逻辑脚本，Rig Graph是骨架约束脚本；一个是Controller，一个是Component（作为功能载体）。 在动画蓝图中可以使用Control Rig节点，对动画Pose做一个修饰，而不是在蓝图中做整体的修改。（？？）
+          - 重定向：
+            - 动态重定向：利用Rig约束实时性，利用IK功能实现一些表现效果？
+            - 静态重定向：将骨架约束的步骤放到Unreal中，使美术不需要每次调整都进行导出？![20240909103051](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909103051.png)
+          - ref：https://zhuanlan.zhihu.com/p/591982020 ； https://zhuanlan.zhihu.com/p/353524801 ； https://zhuanlan.zhihu.com/p/607900232
+        - IK Rig: 基于IK的绑定工具。提供交互式创建 **解算器**， 为骨骼网格体执行姿势编辑。IK Rig 重定向 系统可以用于在不同比例的角色之间传输动画。
+          - IK重定向： 支持在骨架完全不同的角色间进行动画资产重定向或实时动画重定向。跨骨骼时进行动画资产重定向？
+    - Motion transition：选定要进行切换的帧(比如脚落地时)，在其前后选定一定范围进行插值。![20240909110459](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909110459.png)![20240909110514](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909110514.png) 但如果直接进行插值会导致“滑步”等问题，需要先将两个动作对其。![20240909112742](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909112742.png)
+      - Facing/Moving Frame: 一个跟随角色移动的坐标系。原点为root节点在地面上的投影，Z轴指向角色朝向(可以是 位移方向/T-pose正方向/。。。)![20240909114506](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909114506.png) 朝向 *R*只有Y轴上的旋转；坐标原点*t*只有XZ屏幕上的取值.
+        朝向R可以理解为：从世界坐标的Z轴，到Facing Frame坐标下的Z轴的旋转。 或世界坐标的X轴(可以是shoulders/Hips的连线)，到Facing Frame坐标下的X轴的旋转
+      - Rotation Decomposition: 任何一个旋转都可以分解为: 一个绕着XZ平面上的一个轴的旋转 * 一个Y轴上的旋转$R_y$ ![20240909114854](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909114854.png)
+        $R_y = R^{'}*R$: $R_y$等于Facing坐标下Y轴到世界坐标Y轴的旋转 * R![20240909115710](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909115710.png)
+      - 分别对“朝向”，“根节点”进行插值？？![20240909120024](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909120024.png)
+    - Motion graph： 本质是状态机; 可以将较长的一段动画，分割拆解为多个动画片段? ![20240909120638](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909120638.png)用程序检测动画片段中每一帧的相似性（速度，加速度，速速度，Pose之间的距离），根据阈值找到动画片段中相似度最接近的的动画点，并生成过渡动画。?? --> 换言之就是找到两个动画的相似帧，并通过相似帧进行“缝合”形成新的动画片段。![20240909142644](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909142644.png)
+      - move trees(动画状态机)：每一条边（Edge）代表一个动画片段，每一个点（Node）代表一个选择点。![20240909143219](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909143219.png)。 选择哪条边主要根据user input 或 clip end(根据clip初始/最终的相对位移/角度)进行判断![20240909174503](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909174503.png)
+      - Motion graph可以程序化地为数据集添加过渡点（选择点Node）, 创建时遵循两条原则：
+        -  为了保持动画的质量，我们只在两个动画相似时才进行过渡。
+        -  为了保持对动画的控制，我们寻找”最佳的“动画边。
+          ![20240909142829](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909142829.png)
+      - How to segment: 识别初始剪辑中足够相似的部分，这种相似需要考虑位移，速度，加速等![20240909143716](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909143716.png)
+        - Frame Distance: 将MotionA的*i*th frame 与 MotionB的 *j*th frame 在长度为K（大约$\frac{1}{3}$秒的帧数）帧中每个joint的position绘制为 “Point Cloud A” 和“Point Cloud B”. 二者的squared Euclidian distances between all points in the A cloud and the
+        corresponding points in the transformed B cloud的和就是 MotionA的*i*th frame 与 MotionB的 *j*th frame 的 distance。 ![20240909171350](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909171350.png) ![20240909141305](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909141305.png) （上图中的i，j表示MotionA的*i*th frame 与 MotionB的 *j*th frame， 白色值对应于较低的错误，黑色值对应于较高的错误。彩色点代表局部最小值）![20240909173137](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909173137.png) （大概是将二者的点p，$p^'$想对应，坐标系对齐？？？）
+      - Interactive Animation Pipeline： ![20240909174856](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909174856.png)
+    - ![20240909182359](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909182359.png)
+    - Motion Fields: 将clip按每帧进行拆分，得到各帧的pose。再根据当前帧的pose，选择相邻帧中的N个最近邻，混合N个最近邻pose得到结果作为下一个姿态。![20240909182058](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909182058.png) 通过给与不同的权重来实现最后混合结果的不同。![20240909182447](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909182447.png)
+      - problem：![20240909182848](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909182848.png) --》论文中利用的是“强化学习”
+    - Motion Matching： 只找一个最近邻，作为下一个姿态，之间进行插值。 ![20240909183049](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909183049.png)
+      - How to define "Nearest": Distance function/ metric
+      - 相对于motion graph更细粒度？
+
+- ref:
+  - https://icg.gwu.edu/sites/g/files/zaxdzs6126/files/downloads/Motion%20graphs.pdf
+  - https://sci.utah.edu/~duong/papers/motion-graph.pdf
+  - https://cs.brown.edu/courses/cs196-2/2006/projects/2.pdf
+  - https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=51f71d439078a839de118897509196670514bb95
+  - https://zhuanlan.zhihu.com/p/641718060
+  - https://slideplayer.com/slide/4546668/release/woothee
