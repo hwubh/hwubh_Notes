@@ -1,0 +1,36 @@
+- Learning-based Character Animation
+  - Statistical Models of Human Motion
+    - The Low-dimensionality of Human Motions: ![20240910102334](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910102334.png). 人的自然姿态是有限的.
+    - Principal Component Analysis: 用于寻找人的姿势集合所构成的曲面?的方法. 
+      - 寻找不同维度之间的相对关系
+      - 降维
+    ![20240910102705](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910102705.png)
+    (找到能提供足够多有用数据(信息,方差较大的)的轴)![20240910103012](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910103012.png)
+    方向向量 **u** 的取值![20240910103223](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910103223.png)
+      - Nutshell: 寻找若干个轴来表示, 每当找到一个轴后, 剔除该轴所使用的数据, 使用剩下的数据寻找下一个轴.![20240910103544](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910103544.png)各个方向向量**u**都是 $X^T$$X$的特征值,从大到小能代表的值越来愈少. 可以拆解单独的动作, 其组合的轴越多, 动作与原本越接近.![20240910103622](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910103622.png)
+      -> 95% of variance 能比较好的模拟.![20240910104030](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910104030.png)
+      - usage: 用于检验动作的好坏(也可以去除噪点): ![20240910104533](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910104533.png)
+        - e.g.: Character IK![20240910104702](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910104702.png)
+    - Gaussian Models:       
+      - Data distribution: ![20240910104803](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910104803.png)
+        - Gaussian Distri.: ![20240910104929](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910104929.png)
+      - Motion Synthesis with a Motion Prior: $f(x)$, 任务相关项; $wlog_{p}(x)$, 动作先验项.![20240910105255](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910105255.png)
+      - Distribution Models: 
+        - Gaussian Mixture Models (GMM) ![20240910105645](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910105645.png)
+        - Gaussian Process Latent Variable Model (GPLVM):
+  - Learning-based Models: 
+    - Motion Models: 一个判断姿势是否是自然姿势的模型。
+      - Probability func: 是自然动作的概率![20240910110513](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910110513.png)![20240910115026](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910115026.png) 根据过去t-1帧的姿态，生成的下一帧的姿态为自然姿态的概率![20240910115403](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910115403.png)
+        - Markov Property： def：当一个随机过程在给定现在状态及所有过去状态情况下，其未来状态的条件概率分布仅依赖于当前状态 -》当前帧的姿态只由上一帧的姿态决定 ![20240910120112](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910120112.png)  
+      - 两种方式：左: 一次性生成所有动作。 右：根据当前帧的姿势与约束条件生成下一帧的姿势（约束条件是显性的）。 ![20240910115919](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910115919.png)
+    - Autoregressive models: 动作被拆分为若干个前后两帧的形式（二元组）用于训练？![20240910121640](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910121640.png) 根据已有的二元组训练的模型，可以从输入的当前帧的姿势预测合理的下一帧姿势![20240910121854](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910121854.png)
+      - Neural Network: 由于涉及的维度较多，不好进行插值。使用神经网络模型进行拟合。 使用 stochastic gradient descent 求解最小值![20240910142435](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910142435.png)
+        - stochastic gradient descent： ![20240910142655](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910142655.png)
+        - Ambiguity Issue： 存在多个可能的结果
+        - Hidden Variables： 约束条件：
+      - PFNN（Phase-Functioned Neural Networks）： ![20240910143107](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910143107.png) 包含**控制**/**相位**参数， 每个专家（模型）学习特定相位时的预测。
+        - Mixture of Experts: 使用多个模型得到结果，最后加权平均![20240910143455](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910143455.png)
+          - Weighted-Blended： 使用一个模型混合所有的模型的参数。![20240910143621](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910143621.png)
+          - adbvance Phase-Functiones: 不同的模型使用不同的权重生成新的模型。权重由“Gating Network”输出。![20240910144221](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910144221.png)
+    - Generative models: 
+      - Types： ![20240910145011](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910145011.png)![20240910144906](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910144906.png)

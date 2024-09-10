@@ -50,7 +50,13 @@
     - Motion Fields: 将clip按每帧进行拆分，得到各帧的pose。再根据当前帧的pose，选择相邻帧中的N个最近邻，混合N个最近邻pose得到结果作为下一个姿态。![20240909182058](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909182058.png) 通过给与不同的权重来实现最后混合结果的不同。![20240909182447](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909182447.png)
       - problem：![20240909182848](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909182848.png) --》论文中利用的是“强化学习”
     - Motion Matching： 只找一个最近邻，作为下一个姿态，之间进行插值。 ![20240909183049](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240909183049.png)
-      - How to define "Nearest": Distance function/ metric
+      - How to define "Nearest": Distance function/ metric ![20240910101427](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240910101427.png)
+      - Smooth motion:
+        - do the search every few frames
+        - Smoothly Blend
+      - Good Performance:
+        - efficient data for searching: KD-tree
+        - efficient datatset: Dance card
       - 相对于motion graph更细粒度？
 
 - ref:

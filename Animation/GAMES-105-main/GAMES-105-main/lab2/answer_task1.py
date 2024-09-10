@@ -208,7 +208,14 @@ class BVHMotion():
         Ry = np.zeros_like(rotation)
         Rxz = np.zeros_like(rotation)
         # TODO: 你的代码
-        
+        rot_matrix = R.from_quat(rotation).as_matrix()
+        y_axis = rot_matrix[:, 1]
+        rot_axis = np.cross(y_axis, (0,1,0))
+        y_angle = np.arccos(np.dot(y_axis, (0,1,0)) / np.linalg.norm(y_axis))
+        Ry = (R.from_rotvec(rot_axis * y_angle / np.linalg.norm(rot_axis)) * R.from_quat(rotation)).as_quat()
+        Ry_inv = R.from_quat(Ry).inv()
+        Rxz = (Ry_inv * R.from_quat(rotation)).as_quat()
+
         return Ry, Rxz
     
     # part 1
@@ -232,6 +239,22 @@ class BVHMotion():
         offset = target_translation_xz - res.joint_position[frame_num, 0, [0,2]]
         res.joint_position[:, 0, [0,2]] += offset
         # TODO: 你的代码
+        Ry, Rxz = self.decompose_rotation_with_yaxis(res.joint_rotation[frame_num, 0])
+        r_matrix = R.from_quat(Ry).as_matrix()
+        Local_Z_Axis = r_matrix[:, 2]
+        Target_Z_Axis = np.array([target_facing_direction_xz[0], 0, target_facing_direction_xz[1]])
+
+        y_axis = np.cross(Local_Z_Axis, Target_Z_Axis) / (np.linalg.norm(Local_Z_Axis) * np.linalg.norm(Target_Z_Axis))
+        r_angle = np.arccos(np.dot(Local_Z_Axis, Target_Z_Axis) / (np.linalg.norm(Local_Z_Axis) * np.linalg.norm(Target_Z_Axis)))
+        delta_rotation = R.from_rotvec(r_angle * y_axis)
+
+        res.joint_rotation[:, 0, :] = np.apply_along_axis(lambda q: (delta_rotation * R.from_quat(q)).as_quat(), axis=1, arr= res.joint_rotation[:, 0, :])
+        
+        offset_center = res.joint_position[frame_num, 0, [0,2]]
+        res.joint_position[:, 0, [0,2]] -= offset_center
+        res.joint_position[:, 0, :] = np.apply_along_axis(delta_rotation.apply, axis=1, arr=res.joint_position[:, 0, :])
+        res.joint_position[:, 0, [0,2]] += offset_center
+
         return res
 
 # part2
