@@ -1,5 +1,6 @@
 import numpy as np
 import copy
+import math
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
 # ------------- lab1里的代码 -------------#
@@ -257,6 +258,19 @@ class BVHMotion():
 
         return res
 
+def slerp_single_quat(q1, q2, alpha):
+    slerp = Slerp([0, 1], R.from_quat([q1, q2]))
+    return slerp([alpha]).as_quat()[0]
+
+def Interpolation(position1, position2, rotation1, rotation2, lerp):
+    position = np.empty_like(position1)
+    rotation = np.empty_like(rotation1)
+    
+    rotation = np.array([slerp_single_quat(q1, q2, lerp) for q1, q2 in zip(rotation1, rotation2)])
+    position = (1-lerp) * position1 + lerp * position2
+
+    return position, rotation
+
 # part2
 def blend_two_motions(bvh_motion1, bvh_motion2, alpha):
     '''
@@ -273,6 +287,43 @@ def blend_two_motions(bvh_motion1, bvh_motion2, alpha):
     res.joint_rotation[...,3] = 1.0
 
     # TODO: 你的代码
+    cur_delta_time = 1 / (len(alpha) - 1)
+    bvh1_delta_time = 1 / (bvh_motion1.motion_length - 1)
+    bvh2_delta_time = 1 / (bvh_motion2.motion_length - 1)
+
+    for i in range(len(alpha)):
+        bvh1_time = i * cur_delta_time / bvh1_delta_time
+        bvh1_index = math.floor(bvh1_time)
+        lerp_Value_1 = bvh1_time - bvh1_index
+
+        position1, rotation1 = Interpolation(
+            bvh_motion1.joint_position[bvh1_index, ...],
+            bvh_motion1.joint_position[(bvh1_index + 1) % bvh_motion1.motion_length, ...],
+            bvh_motion1.joint_rotation[bvh1_index, ...],
+            bvh_motion1.joint_rotation[(bvh1_index + 1) % bvh_motion1.motion_length, ...],
+            lerp_Value_1
+        )
+
+        bvh2_time = i * cur_delta_time / bvh2_delta_time
+        bvh2_index = math.floor(bvh2_time)
+        lerp_Value_2 = bvh2_time - bvh2_index
+
+        position2, rotation2 = Interpolation(
+            bvh_motion2.joint_position[bvh2_index, ...],
+            bvh_motion2.joint_position[(bvh2_index + 1) % bvh_motion2.motion_length, ...],
+            bvh_motion2.joint_rotation[bvh2_index, ...],
+            bvh_motion2.joint_rotation[(bvh2_index + 1) % bvh_motion2.motion_length, ...],
+            lerp_Value_2
+        )
+
+        res.joint_position[i, ...], res.joint_rotation[i, ...] = Interpolation(
+            position1,
+            position2,
+            rotation1,
+            rotation2,
+            alpha[i]
+        )
+
     
     return res
 
@@ -291,6 +342,23 @@ def build_loop_motion(bvh_motion):
     return build_loop_motion(res)
 
 # part4
+def nearest_frame(motion, target_pose):
+    def pose_distance(pose1, pose2):
+        total_dis = 0.
+        for i in range(1, pose1.shape[0]):
+            total_dis += np.linalg.norm(pose1[i] - pose2[i])
+        return total_dis
+
+    min_dis = float("inf")
+    ret = -1
+    for i in range(motion.motion_length):
+        dis = pose_distance(motion.joint_rotation[i], target_pose)
+        if dis < min_dis:
+            ret = i
+            min_dis = dis
+    return ret
+
+# part4 linear interpolation
 def concatenate_two_motions(bvh_motion1, bvh_motion2, mix_frame1, mix_time):
     '''
     将两个bvh动作平滑地连接起来，mix_time表示用于混合的帧数
@@ -300,11 +368,116 @@ def concatenate_two_motions(bvh_motion1, bvh_motion2, mix_frame1, mix_time):
         你可能需要用到BVHMotion.sub_sequence 和 BVHMotion.append
     '''
     res = bvh_motion1.raw_copy()
-    
     # TODO: 你的代码
     # 下面这种直接拼肯定是不行的(
-    res.joint_position = np.concatenate([res.joint_position[:mix_frame1], bvh_motion2.joint_position], axis=0)
-    res.joint_rotation = np.concatenate([res.joint_rotation[:mix_frame1], bvh_motion2.joint_rotation], axis=0)
-    
+    # res.joint_position = np.concatenate([res.joint_position[:mix_frame1], bvh_motion2.joint_position], axis=0)
+    # res.joint_rotation = np.concatenate([res.joint_rotation[:mix_frame1], bvh_motion2.joint_rotation], axis=0)
+
+    bvh_motion2 = build_loop_motion(bvh_motion2)
+    mix_frame2 = nearest_frame(bvh_motion2, res.joint_rotation[mix_frame1])
+    bvh_motion2_sub = bvh_motion2.raw_copy()
+    target_translation_xz = bvh_motion2_sub.joint_position[-1, 0, [0, 2]]
+    target_facing_direction_xz = R.from_quat(bvh_motion2.joint_rotation[-1, 0]).apply(np.array([0,0,1])).flatten()[[0, 2]]
+    bvh_motion2_sub = bvh_motion2_sub.translation_and_rotation(0, target_translation_xz, target_facing_direction_xz)
+    bvh_motion2_sub.joint_position = bvh_motion2_sub.joint_position[:mix_frame2]
+    bvh_motion2_sub.joint_rotation = bvh_motion2_sub.joint_rotation[:mix_frame2]
+    bvh_motion2.append(bvh_motion2_sub)
+
+    target_translation_xz_1 = res.joint_position[mix_frame1, 0, [0, 2]]
+    target_facing_direction_xz_1 = R.from_quat(res.joint_rotation[mix_frame1, 0]).apply(np.array([0,0,1])).flatten()[[0, 2]]
+    bvh_motion2 = bvh_motion2.translation_and_rotation(mix_frame2, target_translation_xz_1, target_facing_direction_xz_1)
+
+    cur_frame_time1 = mix_frame1
+    cur_frame_time2 = mix_frame2
+    for i in range(mix_time):
+        res.joint_position[cur_frame_time1], res.joint_rotation[cur_frame_time1] = Interpolation(
+            res.joint_position[cur_frame_time1],
+            bvh_motion2.joint_position[cur_frame_time2],
+            res.joint_rotation[cur_frame_time1],
+            bvh_motion2.joint_rotation[cur_frame_time2],
+            (i+0.) / mix_time)
+        cur_frame_time1 += 1
+        cur_frame_time2 += 1
+   
+    res.joint_position = np.concatenate([res.joint_position[:cur_frame_time1], bvh_motion2.joint_position[cur_frame_time2:]], axis=0)
+    res.joint_rotation = np.concatenate([res.joint_rotation[:cur_frame_time1], bvh_motion2.joint_rotation[cur_frame_time2:]], axis=0)
+
     return res
+
+def concatenate_two_motions_Inertailization(bvh_motion1, bvh_motion2, mix_frame1, mix_time):
+    '''
+    将两个bvh动作平滑地连接起来，mix_time表示用于混合的帧数
+    混合开始时间是第一个动作的第mix_frame1帧
+    虽然某些混合方法可能不需要mix_time，但是为了保证接口一致，我们还是保留这个参数
+    Tips:
+        你可能需要用到BVHMotion.sub_sequence 和 BVHMotion.append
+    '''
+    res = bvh_motion1.raw_copy()
+    # TODO: 你的代码
+    # 下面这种直接拼肯定是不行的(
+    # res.joint_position = np.concatenate([res.joint_position[:mix_frame1], bvh_motion2.joint_position], axis=0)
+    # res.joint_rotation = np.concatenate([res.joint_rotation[:mix_frame1], bvh_motion2.joint_rotation], axis=0)
+
+    bvh_motion2 = build_loop_motion(bvh_motion2)
+    mix_frame2 = nearest_frame(bvh_motion2, res.joint_rotation[mix_frame1])
+    bvh_motion2_sub = bvh_motion2.raw_copy()
+    target_translation_xz = bvh_motion2_sub.joint_position[-1, 0, [0, 2]]
+    target_facing_direction_xz = R.from_quat(bvh_motion2.joint_rotation[-1, 0]).apply(np.array([0,0,1])).flatten()[[0, 2]]
+    bvh_motion2_sub = bvh_motion2_sub.translation_and_rotation(0, target_translation_xz, target_facing_direction_xz)
+    bvh_motion2_sub.joint_position = bvh_motion2_sub.joint_position[:mix_frame2]
+    bvh_motion2_sub.joint_rotation = bvh_motion2_sub.joint_rotation[:mix_frame2]
+    bvh_motion2.append(bvh_motion2_sub)
+
+    target_translation_xz_1 = res.joint_position[mix_frame1, 0, [0, 2]]
+    target_facing_direction_xz_1 = R.from_quat(res.joint_rotation[mix_frame1, 0]).apply(np.array([0,0,1])).flatten()[[0, 2]]
+    bvh_motion2 = bvh_motion2.translation_and_rotation(mix_frame2, target_translation_xz_1, target_facing_direction_xz_1)
+
+    cur_frame_time1 = mix_frame1
+    cur_frame_time2 = mix_frame2
+    offset_Position = bvh_motion2.joint_position[mix_frame2] - bvh_motion1.joint_position[mix_frame1]
+    test1 = R.from_quat(bvh_motion2.joint_rotation[mix_frame2]).as_euler('xyz') 
+    test2 = R.from_quat(bvh_motion1.joint_rotation[mix_frame1]).as_euler('xyz')
+    offset_Rotation = test1 - test2
+
+    for i in range(mix_time):
+        res.joint_position[cur_frame_time1], res.joint_rotation[cur_frame_time1] = Inertailization(
+        bvh_motion2.joint_position[cur_frame_time2],
+        offset_Position,
+        bvh_motion2.joint_rotation[cur_frame_time2],
+        offset_Rotation,
+        (mix_time - i + 0.) / mix_time)
+
+        cur_frame_time1 += 1
+        cur_frame_time2 += 1
+
+    for i in range(len(res.joint_rotation[cur_frame_time1])):
+        print(res.joint_position[cur_frame_time1][i] - bvh_motion1.joint_position[cur_frame_time1][i])
+    
+    res.joint_position = np.concatenate([res.joint_position[:cur_frame_time1], bvh_motion2.joint_position[cur_frame_time2:]], axis=0)
+    res.joint_rotation = np.concatenate([res.joint_rotation[:cur_frame_time1], bvh_motion2.joint_rotation[cur_frame_time2:]], axis=0)
+
+    return res
+
+def Inertailization(position1, offset_position, rotation1, offset_rotation, lerp):
+    position = np.empty_like(position1)
+    rotation = np.empty_like(rotation1)
+    
+    position = position1 - offset_position * lerp
+    rotation = np.array([Inertailization_single_rotation(q1, q2, lerp) for q1, q2 in zip(rotation1, offset_rotation)])
+
+    return position, rotation
+
+def Inertailization_single_rotation(q1, q2, alpha):
+    e1 = R.from_quat(q1).as_euler('xyz')
+    e2 = q2
+    # e1 = normalize_euler_angles(e1)
+    # e2 = normalize_euler_angles(e2)
+    e = e1 - e2 * alpha
+    ##print(alpha)
+    return R.from_euler('xyz', e).as_quat()
+
+def normalize_euler_angles(euler_angles):
+    # 将欧拉角规范化到 [-pi, pi] 范围内
+    return (euler_angles + np.pi) % (2 * np.pi) + np.pi
+
 

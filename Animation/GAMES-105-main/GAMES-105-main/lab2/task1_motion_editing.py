@@ -121,7 +121,7 @@ def part4_concatenate(viewer, setting_id):
     run_forward = BVHMotion('motion_material/run_forward.bvh')
     run_forward.adjust_joint_name(walk_forward.joint_name)
     
-    motion = concatenate_two_motions(walk_forward, run_forward, mix_time, 30)
+    motion = concatenate_two_motions_Inertailization(walk_forward, run_forward, mix_time, 30)
     translation, orientation = motion.batch_forward_kinematics()
     task = ShowBVHUpdate(viewer, motion.joint_name, translation, orientation)
     viewer.addTask(task.update)
@@ -135,10 +135,10 @@ def main():
     # 请自行取消需要的注释并更改测试setting_id
     # 请不要同时取消多个注释，否则前者会被后者覆盖
     
-    part1_translation_and_rotation(viewer, 0) # 数字代表不同的测试setting
+    # part1_translation_and_rotation(viewer, 0) # 数字代表不同的测试setting
     # part2_interpolate(viewer, 1) # 数字代表不同期望的前进速度
     # part3_build_loop(viewer)
-    # part4_concatenate(viewer, 0) # 数字代表不同的测试setting
+    part4_concatenate(viewer, 0) # 数字代表不同的测试setting
     viewer.run()
     
 if __name__ == '__main__':

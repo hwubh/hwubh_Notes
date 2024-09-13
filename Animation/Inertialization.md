@@ -1,0 +1,11 @@
+- Def: 在预混合的时候记录当前动画的状态以及到目标动画的差值，后面直接用多次多项式计算过渡动画的Transform值拟合。 相对于相同的插值，**只需要采样对target进行采样(cross-fade 要两次)**，按照某个曲线对差值进行插值，插值的结果附加到target的采样结果上，直到插值的结果为0，过渡完成。
+- idea：如果存在两个动画需要进行切换，我们记录下切换时刻二者的插值offset。然后切换到target 动画，不过在采样target动画时，需要减去offset的数值。之后我们在一段时间内不断减小offset的取值，直至为0,完成过度。
+- Pros and Cons:
+  - Pros: 简单，效率高，不需要固定的时间。
+  - Cons： 更适用于迅速，简单的变化。可能会有overshoot？
+- 如何避免Overshoot：
+  - 评价函数：![20240913170542](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240913170542.png)， 即![20240913170733](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240913170733.png)
+  - 多项式：![20240913170821](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240913170821.png)，其中$x(0)$ $v(0)$ 为初始条件？？即假设x(0)>0，那么由于不希望出现震荡，v(0)需要截断至小于0的区间。 ![20240913170959](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240913170959.png)？？？
+  - 
+
+- ref: https://theorangeduck.com/page/spring-roll-call#inertialization https://zhuanlan.zhihu.com/p/478466656 https://www.gdcvault.com/play/1025331/Inertialization-High-Performance-Animation-Transitions  https://zhuanlan.zhihu.com/p/380573381 https://zhuanlan.zhihu.com/p/73284882 
