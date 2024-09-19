@@ -201,7 +201,7 @@ class BVHMotion():
     
     #--------------------- 你的任务 -------------------- #
     
-    def decompose_rotation_with_yaxis(self, rotation):
+    def decompose_rotation_with_yaxis(rotation):
         '''
         输入: rotation 形状为(4,)的ndarray, 四元数旋转
         输出: Ry, Rxz，分别为绕y轴的旋转和转轴在xz平面的旋转，并满足R = Ry * Rxz
@@ -240,7 +240,7 @@ class BVHMotion():
         offset = target_translation_xz - res.joint_position[frame_num, 0, [0,2]]
         res.joint_position[:, 0, [0,2]] += offset
         # TODO: 你的代码
-        Ry, Rxz = self.decompose_rotation_with_yaxis(res.joint_rotation[frame_num, 0])
+        Ry, Rxz = BVHMotion.decompose_rotation_with_yaxis(res.joint_rotation[frame_num, 0])
         r_matrix = R.from_quat(Ry).as_matrix()
         Local_Z_Axis = r_matrix[:, 2]
         Target_Z_Axis = np.array([target_facing_direction_xz[0], 0, target_facing_direction_xz[1]])
@@ -478,6 +478,6 @@ def Inertailization_single_rotation(q1, q2, alpha):
 
 def normalize_euler_angles(euler_angles):
     # 将欧拉角规范化到 [-pi, pi] 范围内
-    return (euler_angles + np.pi) % (2 * np.pi) + np.pi
+    return (euler_angles + np.pi / 1.8) % (2 * np.pi / 1.8) - np.pi / 1.8
 
 
