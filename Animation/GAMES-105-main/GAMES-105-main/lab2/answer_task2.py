@@ -129,7 +129,8 @@ class Inertializer():
         transition_src_position[:] = bone_dst_positions[0]
         transition_src_rotation[:] = bone_dst_rotations[0]
 
-        #R.from_quat(bone_dst_rotations[0]).inv().apply(bone_dst_vels[0])): 是局部坐标在 骨骼原始姿势坐标
+        # R.from_quat(bone_dst_rotations[0]).inv().apply(bone_dst_vels[0])): 是局部向量在骨骼原始姿势坐标中的表达（因为这里是根节点的速度，所以等价于根节点空间）
+        #         world_dst_velocity = R.from_quat(root_rotation).apply(R.from_quat(bone_dst_rotations[0]).inv().apply(bone_dst_vels[0]))： 局部向量在世界坐标下的表达（因为是根节点的速度，就只算了根节点相对于世界空间的偏移）
         world_dst_velocity = R.from_quat(root_rotation).apply(\
             R.from_quat(bone_dst_rotations[0]).inv().apply(bone_dst_vels[0]))
         world_dst_avelocity = R.from_quat(root_rotation).apply(\
@@ -197,6 +198,7 @@ class Inertializer():
         halflife,
         dt
     ):
+        #R.from_quat(transition_src_rotation).inv().apply(bone_input_positions[0] - transition_src_position)): 表示局部向量在
         world_position = R.from_quat(transition_dst_rotation).apply(\
             R.from_quat(transition_src_rotation).inv().apply(bone_input_positions[0] - transition_src_position))\
             + transition_dst_position
