@@ -1,0 +1,32 @@
+- Skinning and Facial Animation： ![20240922144213](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922144213.png)
+  - Rigging & Skinning:
+    - Rigging: 偏向于指“控制器”
+    - Skinning： 特殊的“Rigging”？ 利用骨骼来控制。 蒙皮的顶点随着骨骼移动，产生形变。
+        *r*: 蒙皮顶点在局部坐标的位置。![20240922132552](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922132552.png)
+    - Skinning Deformation: 单个顶点可能受多个关节控制， 通过**加权混合**确定关节旋转后的顶点的位置。![20240922133947](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922133947.png)
+  - Linear Blend Skinning (LBS)： 线性混合蒙皮：![20240922134259](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922134259.png)
+    - formula：实际计算时不需要用到局部坐标，加权平局各个关节变换*bindpose下坐标即可：![20240922135127](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922135127.png)
+    - Candy-Wrapper Artifact: 旋转矩阵加权平均后形成的矩阵可能不是一个旋转矩阵! ![20240922135534](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922135534.png)![20240922135520](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922135520.png)
+      - Solve: Multi-linear Skinning, Nonlinear Skinning: Dual-Quaternion Skinning(DQS)
+      - Slerp: ![20240922135932](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922135932.png)
+      - ![20240922140139](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922140139.png)：改变换可以写成一个齐次空间下的线性变换（旋转+平移），即 
+        $$ T_j = \left[\begin{matrix}R_J & \vec{t}_j  \\0 & 1  \\\end{matrix}\right]= [R_j|\vec{t}_j] $$
+    - artifact: ![20240922143233](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922143233.png)
+      - solution: 
+        - ![20240922143259](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922143259.png)
+        - Example-based:![20240922143344](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922143344.png)
+  - Auto skinning: Pinocchio, NeuroSkinning, 
+  - Dual Quaternion Skinning (DQS): 
+    - def： 将刚性变换 $[R_j|\vec{t}_j]$ 转化为一个 dual-quaterinon 变换![20240922142033](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922142033.png)
+        通过$\widehat{q}$ 与 $-\widehat{q}$表达同一个点，保证二者之间的距离小于$\frac{1}{4}$个圆周. 线性插值后投影到圆周上。(避免插值结果在原点时无法投影的问题。)![20240922142514](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922142514.png)
+      - (P.S.): dual number: $x = a + b\epsilon , \epsilon^2 = 0$ -> dual quaterion: $\widehat{q} = q_0 + q_{\epsilon}\epsilon$
+    - artifacts: blend时有突起![20240922143013](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922143013.png)
+  - Blendshapes: Example-based(样例的)![20240922143432](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922143432.png)
+    - formula: 
+      - Raidal Basis Function(RBF) Interpolation:根据距离判断权重。 Basis function要求时球对称的（如*Gaussian*）![20240922143724](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922143724.png)![20240922143912](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922143912.png)
+      - Pose Space Deformation（PSD）： PSD function可以有不同的选择![20240922144058](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922144058.png)
+  - SMPL Model：![20240922144836](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922144836.png)
+    - Facial Animation: ![20240922145034](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922145034.png)
+    - Morphable Face Models: 可变人脸
+    - Face Tracking:![20240922145422](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922145422.png) 
+    - Speech-driven

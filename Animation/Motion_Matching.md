@@ -35,6 +35,7 @@
     - 根节点预测轨迹的3个时刻所对应的世界坐标下的 pos的XZ坐标以及 Z轴指向的XZ坐标，共12项--》归一化？
     - 记录左右脚踝的pos，以及左右脚踝，根节点的速度，共15项
     - 寻找最合适的下一帧。
+  - 计算特征值得分：
 
 
-- ref:https://zhuanlan.zhihu.com/p/662604249 
+- ref:https://zhuanlan.zhihu.com/p/662604249 https://github.com/Cltsu/GAMES105/blob/main/lab2/Viewer/controller.py https://www.theorangeduck.com/page/code-vs-data-driven-displacement  https://zhuanlan.zhihu.com/p/136971426 https://zhuanlan.zhihu.com/p/646264881  

@@ -1,0 +1,24 @@
+# Physics-based Simulation and Articulated Rigid Bodies   
+  - Temporal Discretization: 将积分转化为迭代![20240922152549](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922152549.png) —> Numerical Integration: 近似估计各块的积分结果![20240922152913](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922152913.png)（Forward：起点；Backward：终点； Symplectic: 使用当前的加速度。）
+    - P.S.: Explicit: 不断引入外部能量（摆动更剧烈）； Implicit: 不断损失能量（最终静止）； Symplicit：能量守恒![20240922153152](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922153152.png)![20240922153401](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922153401.png)
+    - Advanced Integration: 
+      - Runge–Kutta methods: 更精确
+      - Variational integration： 
+      - Position-based dynamics (PBD)： 
+  - Rigid: 
+    - Linear and Angular Velocity:![20240922153949](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922153949.png) 直接对q进行线性计算，会导致q的范数不为1，计算后需要重新单位化（Normalization）![20240922154519](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922154519.png)
+  - Dynamics: 考不考虑质量m，如果考虑则为动力学![20240922154727](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922154727.png)
+    - Rigid body as a collection of particles:  质心系![20240922155423](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922155423.png) 
+      - Moment of Inertia： 代表惯性（类似于角速度的“质量”）![20240922155508](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922155508.png) 会根据旋转轴的变化而变化 ![20240922155850](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922155850.png)
+        - 转动惯量随方向变化而变化-》需要积分![20240922160433](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922160433.png)![20240922160540](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922160540.png) （Newton–Euler Equations） -》 discrete： 离散化+半隐式，使用当前帧的转动惯量 ![20240922160627](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922160627.png)
+        - Two Links： ![20240922160834](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922160834.png) -》 with Joint:![20240922161118](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922161118.png)
+        - Constraint Force: 约束力与速度方向垂直 ![20240922161336](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922161336.png) -》 Discrete： ![20240922161505](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922161505.png)-》 correction： 偏离轨道时，计算矫正的加速度![20240922161641](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922161641.png)-》 保证$JM^{-1}J^T$ 可逆： ![20240922161948](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922161948.png) -》 回到约束点(ball-and-socket joint)：![20240922162255](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922162255.png) -> 不同关节，还要考虑朝向约束: ![20240922162508](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922162508.png)
+  - Simulation Basis
+  - Equations of Rigid Bodies
+  - Articulated Rigid Bodies
+  - Contact Models: 
+    - Penality-based Contact Model: 
+      - Contact force: 支持力：类似弹簧，根据陷入深度（因为碰撞检测是离散的，可能会有陷入的情况）判断支持力![20240922162856](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922162856.png)
+      - Frictional Contact: 摩擦力：![20240922163157](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922163157.png)
+    - Contact as a contraint： 速度>=0, 力>=0(只能推开，不能拉近)； V>0, F = 0(不能做功)![20240922163358](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922163358.png) ——》 LCP:![20240922163626](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922163626.png)
+  - Simulation of a Rigid Body System: 计算转动惯量，contact force；——》构建并求解运动学方程，得到下一时刻的速度/角速度。——》根据速度/角度（如积分），更新位置，方向![20240922163745](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240922163745.png)
