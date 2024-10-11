@@ -11,6 +11,10 @@
 ## 基础知识
 ### 前向动力学 Forward Kinematic (FK)
 FK通过调整父关节（joint）的旋转(rotation)来得到其子关节的位置(position)与方向(orientation). 对(骨骼)链中的每个子关节都重复此操作，因此（发生了旋转的）骨骼（关节）都会影响层次结构在其下方的所有骨骼（关节）。 总之，FK需要控制关节的变换(transform)而这在大多数的引擎中都是默认暴露的。
+> P.S.: 
 
 ### 反向动力学 Inverse Kinematic (IK)
-（与FK）相反，IK 要求一个
+（与FK）相反，IK 要求目标位置（target position） 与一个极向量（即旋转轴）作为输入，然后旋转链条上的各个骨骼，使轴的末尾与目标位置重叠。 IK经常用于在身体移动时保持脚部在地面上的位置，以及在抓取骨架层次(skeleton hierachy)外的物品的手臂。
+> P.S.:  
+
+### 反向动力学 Inverse Kinematic (IK)
