@@ -17,4 +17,12 @@ FK通过调整父关节（joint）的旋转(rotation)来得到其子关节的位
 （与FK）相反，IK 要求目标位置（target position） 与一个极向量（即旋转轴）作为输入，然后旋转链条上的各个骨骼，使轴的末尾与目标位置重叠。 IK经常用于在身体移动时保持脚部在地面上的位置，以及在抓取骨架层次(skeleton hierachy)外的物品的手臂。
 > P.S.:  
 
-### 反向动力学 Inverse Kinematic (IK)
+### 质点(Particles) / 韦尔莱积分法(Verlets) / 刚体(Rigidbodies)
+这种方式（刚体 + 韦尔莱积分法）常常用于软体模拟和“布娃娃”物理。 它不通过父/子结构来，而是通过自由浮动、速度驱动的对象来生成姿态。通过添加约束（如最大的*角度*， *距离*）来实时的驱动肢体实现诸如“跌落”等较为复杂的动作。 总之， 这是一种被广泛运动但却不依赖IK, FK的技术。
+
+## 准备
+首先，你需要某种形式的骨骼结构。 Unity 中默认不区分骨骼和“transform”， 因此我们可以用一些基本的集合体来构成骨架。 如果你使用现成的骨骼结构，你也可以通过添加新的肢体或改变几何形状来进行尝试和实验。？？
+- <a href=https://github.com/WeaverDev/filehost/raw/main/Bonehead%20Tutorial/Bonehead_CapsuleSkeleton.unitypackage>“守宫骨架”</a> - 跟着教程自己写代码.
+- <a href=https://github.com/WeaverDev/Bonehead>“完整工程”</a>  - 完整的工程文件（含代码）.
+
+为了之后的方便考虑，最好保证骨架上所有的关节在一个方便计算的位置，例如都指向一个方向，或者局部旋转为0。 这显然会让我们操作时更方便
