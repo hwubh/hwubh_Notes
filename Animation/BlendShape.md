@@ -21,7 +21,15 @@
       ![20241104170707](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241104170707.png)
       - 当前专业的表情模型中，绝大多数的表情都是“矫正表情”
       - cons： 会造成插值曲线的不平整？随着次数(“矫正函数”的元数)的增加而恶化？？--》 因为多元 ($w_1 w_2$) 时，插值不是线性的，导致权重值越高时，斜率越大。![20241104173523](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241104173523.png)
-    - 基于径向基函数（Radial Basis Function，RBF）：
+    - Scattered interpolation （基于径向基函数（Radial Basis Function，RBF））：
+      - 径向函数：![20241105152836](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241105152836.png)
+      - RBF拟合: $y(x) = \omega_0 + \sum_{i=1}^{N} \omega_i \phi(||x-x_i||)$ 其中 $\phi(||x-x_i||)$ 代表基函数，带入高斯函数得到下式
+        - $y(x) = \omega_0 + \sum_{i=1}^{N} \omega_i\ exp(-\gamma||x-x_i||)$
+        - $\omega_0$ 为常数，而 $\omega_i$ 为各个项的权重。 
+        - $\gamma$ 影响高斯函数的变化率，![20241105153718](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241105153718.png)当$\gamma$值较大时，单个项的贡献较大，反之则多各项都参与一定的组成，形成的曲线较为平缓。
+        - N 为样本数量
+      - 如何计算权重$\omega_i$矩阵：带入N个采样点，得到N个方程，![20241105155658](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241105155658.png)
+      因为$\phi$ 为存在为N*N的插值矩阵，且$\varphi_{ij} = \varphi_{ji}$ -> 插值矩阵是对称的。 且因为基函数时高斯函数，其对角线元素均为1，因此插值矩阵是可逆的，易得： $W = \Phi^{-1}y$ ![20241105165614](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241105165614.png)
 
 ### 参考资料
 - https://zhuanlan.zhihu.com/p/657434885
