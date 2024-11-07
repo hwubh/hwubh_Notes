@@ -30,9 +30,29 @@
         - N 为样本数量
       - 如何计算权重$\omega_i$矩阵：带入N个采样点，得到N个方程，![20241105155658](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241105155658.png)
       因为$\phi$ 为存在为N*N的插值矩阵，且$\varphi_{ij} = \varphi_{ji}$ -> 插值矩阵是对称的。 且因为基函数时高斯函数，其对角线元素均为1，因此插值矩阵是可逆的，易得： $W = \Phi^{-1}y$ ![20241105165614](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241105165614.png)
+      - BlendShape实践：？？
+        - 使用slide控制校正表情的权重系数。
+        - 设置$\gamma$ 来控制各个表情的衰减(作用)范围？？
+          ![20241107102733](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241107102733.png)
+- 构建： 
+  - 注册扫描（Register scans）： 
+    - def: 角色注册是将电影或电视剧剧本中的角色与实际的演员进行配对的过程。 -> 获得每次扫描中每个表面顶点当中的对应关系??
+    - 计算不同表情的3D面部扫描之间的表面对应关系的方法：点云对齐（Point Cloud Alignment）特征点匹配（Feature Point Matching）：面部形状模型（Facial Shape Models）：
+  - 模型迁移（Model transfer）： 通过模型传递构建目标模型的主要方法
+    - 先确认源模型与目标模型的中性表情间的顶点的对应关系 -》 记录源模型的中性表情$b_0$的每个三角形与源中的一个表情之一$b_k, k >= 1$中的对应三角形之间的变形梯度 。（“变形梯度”是使源三角形从其中立位置变形的函数的雅可比行列式） -> 保持变形时，源与目标模型上的面皮的变形梯度尽量保持一致。
+  - 自动过程的混合形状模型构建: 
+  - 通过在现有群体中进行插值来生成新模型 :
 
 ### 参考资料
 - https://zhuanlan.zhihu.com/p/657434885
 - https://zhuanlan.zhihu.com/p/659837005
 - https://zhuanlan.zhihu.com/p/391409060
 - https://diglib.eg.org/server/api/core/bitstreams/263adf15-3e7f-481a-a3cc-62b359a6d295/content
+- https://zhuanlan.zhihu.com/p/659837005
+- https://blog.csdn.net/xfijun/article/details/105670892
+- https://zhuanlan.zhihu.com/p/632726235
+- https://zhuanlan.zhihu.com/p/393979616
+- https://zhuanlan.zhihu.com/p/88310390
+- https://zhuanlan.zhihu.com/p/413596878
+- https://zhuanlan.zhihu.com/p/417161899
+- https://zhuanlan.zhihu.com/p/456538362
