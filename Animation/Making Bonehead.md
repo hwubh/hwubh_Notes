@@ -25,4 +25,4 @@ FK通过调整父关节（joint）的旋转(rotation)来得到其子关节的位
 - <a href=https://github.com/WeaverDev/filehost/raw/main/Bonehead%20Tutorial/Bonehead_CapsuleSkeleton.unitypackage>“守宫骨架”</a> - 跟着教程自己写代码.
 - <a href=https://github.com/WeaverDev/Bonehead>“完整工程”</a>  - 完整的工程文件（含代码）.
 
-为了之后的方便考虑，最好保证骨架上所有的关节在一个方便计算的位置，例如都指向一个方向，或者局部旋转为0。 这显然会让我们操作时更方便
+为了之后的方便考虑，最好保证骨架上所有的关节在一个方便计算的位置，例如都指向一个方向，或者局部旋转为0。 这显然会让我们操作骨骼时更方便
