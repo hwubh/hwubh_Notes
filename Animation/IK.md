@@ -35,4 +35,14 @@
                             Compute the Jacobian: J
     -  Find Joint Configurations: -->
 - 
-  -   
+-   
+
+---
+
+- 写IK遇到一些问题
+  - 计算精度：Mathf.Approximately 不太管用
+    - Normal方向 ： 从t转到e的话，计算normal时应该时tXe -》 ![20241112155354](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241112155354.png)
+    - 初始位置上时，误差不断累积导致的扰动与错误。
+    - target 和 end 的值很小时，也容易造成扰动(计算的角度过大![20241112162434](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241112162434.png))
+  - 万向节死锁？
+    - 直接旋转Transform.Rotation好像不太行，先将Normal转换到局部空间内再计算局部的旋转。![20241112154515](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241112154515.png)
