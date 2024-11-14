@@ -25,4 +25,59 @@ FK通过调整父关节（joint）的旋转(rotation)来得到其子关节的位
 - <a href=https://github.com/WeaverDev/filehost/raw/main/Bonehead%20Tutorial/Bonehead_CapsuleSkeleton.unitypackage>“守宫骨架”</a> - 跟着教程自己写代码.
 - <a href=https://github.com/WeaverDev/Bonehead>“完整工程”</a>  - 完整的工程文件（含代码）.
 
-为了之后的方便考虑，最好保证骨架上所有的关节在一个方便计算的位置，例如都指向一个方向，或者局部旋转为0。 这显然会让我们操作骨骼时更方便
+为了之后的方便考虑，最好保证骨架上所有的关节在一个方便计算的位置，例如都指向一个方向，或者局部旋转为0。 这显然会让我们操作骨骼时更方便。
+> **_NOTE:_**: 本文提供的“守宫”上的骨骼大多都是以 Z forward 和 Y up为轴的。 如果你使用的模型不是同样的话，直接使用原文提供的代码的话，需要注意下骨骼局部的旋转。 
+
+在正式开始前，个人推荐可以在package manager里下载库(package)"Animation Rigging".![20241114182937](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241114182937.png)
+在根骨处，添加
+
+## 从“头”开始
+接下来会简单介绍如何实现本文开始所展现的“守宫”的运动效果。
+### 单骨骼追踪(Single Bone Tracking)
+首先让我们创建一个名为"GeckoController"的 MonoBehaviour脚本，其包含之后所有的运动逻辑。 为此，我们先在脚本中声明目标对象和守宫颈部骨骼的索引，在 Unity inspector界面暴露并联接上场景中的这两个对象。
+
+```c#
+using UnityEngine;
+
+public class GeckoController : MonoBehaviour 
+{
+  // 被追踪的目标
+  [SerializeField] Transform target;
+  // 守宫颈部骨骼
+  [SerializeField] Transform headBone;
+  
+  //调用 LateUpdate 来更新我们所有的动画逻辑
+  //其次序在游戏逻辑(Update())与渲染流程之间
+  //前者保证动画使用正确的数据
+  //后者保证动画与渲染结果相符合
+  //关于Unity事件函数的执行循序：https://docs.unity3d.com/6000.0/Documentation/Manual/execution-order.html
+  void LateUpdate()
+  {
+    // 具体控制骨骼的代码
+  }
+}
+```
+>Note: <span style="color:red"> [*SerializeField*] </span>可以暴露非public的变量到Unity Inspector上。
+
+然后，将脚本挂载在守宫的根骨骼“Gecko”，然后在场景中添加上一个GameObject "LookTarget"并将其与“Gecko_Neck”一起挂载到Inspector上。![20241114174321](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241114174321.png)
+
+我们目标是得到一个**四元数**其使守宫的头部朝向目标对象。 
+> Note: 四元数是旋转的一种表达形式，本文中我们将其当作是“3D方向”处理，具体原理可以参考这篇文章： https://krasjet.github.io/quaternion/quaternion.pdf
+
+首先我们计算得到“头部”到目标对象的相对位移，即从头部对象的位置指向到目标对象位置的一个向量。
+``` c#
+// 这里的向量表达是在世界坐标下的。
+Vector3 towardObjectFromHead = target.position - headBone.position;
+```
+为了得到指向目标对象的的方向，我们调用 <a href=https://docs.unity3d.com/ScriptReference/Quaternion.LookRotation.html>“Quaternion.LookRotation”</a> 函数。这个(Unity)函数需要我们提供一个“Forward”方向与参考的“Up”方向，输出一个Z轴正方向指向"Forward"方向， y轴正方向与“Up”方向相似(二者点乘>0)的四元数。 
+``` c#
+headBone.rotation = Quaternion.LookRotation(towardObjectFromHead, transform.up);
+```
+这里我们使headbone 的Z轴正方向指向目标对象，Y轴正方向与根骨骼的的Y轴正方向相似。 因为headbone的Z轴正方向本身与骨骼朝向是同向的，所以我们便实现了对于头部朝向的控制。
+![onebone2](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/onebone2.gif)
+
+通过添加下述调试指令，我们可以看到目前headbone的Z轴正方向已经与目标对象相交。
+``` c#
+Debug.DrawLine(headBone.position, headBone.position + headBone.forward * 10, Color.red);
+```
+![20241114182631](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241114182631.png)
