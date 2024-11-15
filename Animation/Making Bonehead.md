@@ -29,7 +29,8 @@ FK通过调整父关节（joint）的旋转(rotation)来得到其子关节的位
 > **_NOTE:_**: 本文提供的“守宫”上的骨骼大多都是以 Z forward 和 Y up为轴的。 如果你使用的模型不是同样的话，直接使用原文提供的代码的话，需要注意下骨骼局部的旋转。 
 
 在正式开始前，个人推荐可以在package manager里下载库(package)"Animation Rigging".![20241114182937](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241114182937.png)
-在根骨处，添加
+在根骨“Gecko”处，添加Component"Bone Renderer"。 然后就可以将我们想要可视化的骨骼首尾的两个关节添加到"Transforms"项中。 这里以“Gecko_Neck” 为例，我们可以把“Gecko_Neck”以及它的子节点“Gecko_Jaw”加入“Transforms”便能得到下图中以“Gecko_Neck”为起点，结束在“Gecko_Jaw”的一个蓝色锥体。点击该锥体，便会显示出以“Gecko_Neck”的位置为原点的坐标轴（记得Scene里要设置成“Pivot”）。 
+![20241115155752](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241115155752.png)
 
 ## 从“头”开始
 接下来会简单介绍如何实现本文开始所展现的“守宫”的运动效果。
@@ -69,15 +70,49 @@ public class GeckoController : MonoBehaviour
 // 这里的向量表达是在世界坐标下的。
 Vector3 towardObjectFromHead = target.position - headBone.position;
 ```
-为了得到指向目标对象的的方向，我们调用 <a href=https://docs.unity3d.com/ScriptReference/Quaternion.LookRotation.html>“Quaternion.LookRotation”</a> 函数。这个(Unity)函数需要我们提供一个“Forward”方向与参考的“Up”方向，输出一个Z轴正方向指向"Forward"方向， y轴正方向与“Up”方向相似(二者点乘>0)的四元数。 
+为了得到指向目标对象的的方向，我们调用 <a href=https://docs.unity3d.com/ScriptReference/Quaternion.LookRotation.html>“Quaternion.LookRotation”</a> 函数。这个(Unity)函数需要我们提供一个“Forward”方向与参考的“Up”方向，输出一个Z轴正方向指向"Forward"方向， y轴正方向与“Up”方向**相似**(二者点乘>0)的四元数。 
 ``` c#
 headBone.rotation = Quaternion.LookRotation(towardObjectFromHead, transform.up);
 ```
-这里我们使headbone 的Z轴正方向指向目标对象，Y轴正方向与根骨骼的的Y轴正方向相似。 因为headbone的Z轴正方向本身与骨骼朝向是同向的，所以我们便实现了对于头部朝向的控制。
+这里我们使headbone “Gecko_Neck” 的(局部空间)Z轴正方向指向目标对象，Y轴正方向与根骨骼的的Y轴正方向相似。 因为headbone的原先的Z轴正方向与头部朝向是相似的，所以我们便实现了对于头部朝向的控制。
 ![onebone2](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/onebone2.gif)
 
 通过添加下述调试指令，我们可以看到目前headbone的Z轴正方向已经与目标对象相交。
 ``` c#
 Debug.DrawLine(headBone.position, headBone.position + headBone.forward * 10, Color.red);
 ```
-![20241114182631](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241114182631.png)
+![20241115155936](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241115155936.png)
+
+为了使头部运动表现更为自然，而不是瞬间移动和穿模，我们还需要对其的添加上阻尼和角度限制。
+- 阻尼： 首先将运动根据速度分帧处理，根据Lerp()得到当前帧所在的位置。 使用speed * Time.deltaTime 一方面可以模拟出越靠近Target时，位移变化越小的效果。 另一方面也保证了速率不会因为帧率的波动而波动。
+    ``` c#
+    current = Mathf.Lerp(
+    current, 
+    target, 
+    speed * Time.deltaTime
+    );
+    ```
+    但考虑到speed * Time.deltaTime可能存在大于1的情况，我们这里使用“1 - Mathf.Pow(smoothing, dt)”来代替插值项。
+    ``` c#
+    current = Mathf.Lerp(
+    current, 
+    target, 
+    1 - Mathf.Exp(-speed * Time.deltaTime)
+    );
+    ```
+    >Note:  参考资料：<a href = "https://www.rorydriscoll.com/2016/03/07/frame-rate-independent-damping-using-lerp/">frame rate independent damping function </a>
+
+    因为我们的关节是通过旋转来改变(子关节的)位移的，这里使用<a href = "https://discussions.unity.com/t/what-is-the-difference-of-quaternion-slerp-and-lerp/453377/19">Slerp</a>代替Lerp。从而得到我们代码实际使用的内容。
+    ``` c#
+    Quaternion targetRotation = Quaternion.LookRotation(
+    towardObjectFromHead, 
+    transform.up
+    );
+    headBone.rotation = Quaternion.Slerp(
+    headBone.rotation, 
+    targetRotation, 
+    1 - Mathf.Exp(-speed * Time.deltaTime)
+    );
+    ```
+    ![onebone3](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/onebone3.gif)
+  - 角度限制： 我们会使用一个角度值来表示headbone所能转动的最大角度。因为是以headbone为基准进行判断，我们需要先将目标向量从世界空间下的表达转换到headbone的局部空间下再进行判断。 Unity中提供了函数
