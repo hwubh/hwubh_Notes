@@ -115,4 +115,5 @@ Debug.DrawLine(headBone.position, headBone.position + headBone.forward * 10, Col
     );
     ```
     ![onebone3](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/onebone3.gif)
-  - 角度限制： 我们会使用一个角度值来表示headbone所能转动的最大角度。因为是以headbone为基准进行判断，我们需要先将目标向量从世界空间下的表达转换到headbone的局部空间下再进行判断。 Unity中提供了函数
+  - 角度限制： 我们会使用一个角度值来表示headbone所能转动的最大角度。因为是以headbone为基准进行判断，我们需要先将目标向量从世界空间下的表达转换到headbone的局部空间下再进行判断。 Unity中提供了函数 <a href = "https://docs.unity3d.com/ScriptReference/Transform.InverseTransformDirection.html">Vector3.RotateTowards</a> 通过传入的四个参数: 初始/结束指向， 最大弧度，最大长度变化，计算出实际的结束指向。 接着根据得到的指向，使用 Quaternion.LookRotation 计算出其对应的3D方向（四元数）。
+  ![onebone4](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/onebone4.gif)
