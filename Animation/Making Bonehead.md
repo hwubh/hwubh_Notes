@@ -117,3 +117,87 @@ Debug.DrawLine(headBone.position, headBone.position + headBone.forward * 10, Col
     ![onebone3](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/onebone3.gif)
   - 角度限制： 我们会使用一个角度值来表示headbone所能转动的最大角度。因为是以headbone为基准进行判断，我们需要先将目标向量从世界空间下的表达转换到headbone的局部空间下再进行判断。 Unity中提供了函数 <a href = "https://docs.unity3d.com/ScriptReference/Transform.InverseTransformDirection.html">Vector3.RotateTowards</a> 通过传入的四个参数: 初始/结束指向， 最大弧度，最大长度变化，计算出实际的结束指向。 接着根据得到的指向，使用 Quaternion.LookRotation 计算出其对应的3D方向（四元数）。
   ![onebone4](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/onebone4.gif)
+
+  对应的代码：
+    ``` c#
+    // 这里的向量表达是在世界坐标下的。
+    Vector3 towardObjectFromHead = target.position - headBone.position;
+    //记录headbone当前的局部旋转
+    Quaternion currentLcoalRotation = headBone.localRotation;
+    //当headBone的局部旋转被置空后，headbone 和 headboned的父节点相对于世界空间的变换相同。
+    headBone.localRotation = Quaternion.identity;
+    var targetLocalLookDir = headBone.InverseTransformDirection(towardObjectFromHead);
+    // 相当于一个Clamp操作，将角度限制在0到headMaxTurnAngle之间。
+    targetLocalLookDir = Vector3.RotateTowards(Vector3.forward, targetLocalLookDir, Mathf.Deg2Rad * headMaxTurnAngle, 0);
+    //计算目标旋转在局部空间下的表达。
+    Quaternion targetLocalRotation = Quaternion.LookRotation(targetLocalLookDir, Vector3.up);
+
+    headBone.localRotation = Quaternion.Slerp(
+        currentLcoalRotation, targetLocalRotation,
+        1 - Mathf.Exp(-speed * Time.deltaTime));
+
+    //调试代码
+    {
+        Debug.DrawLine(headBone.position, headBone.position + headBone.forward * 10, Color.red);
+        //显示头部的旋转范围
+        var length = Mathf.Tan(headMaxTurnAngle * Mathf.Deg2Rad) * 3;
+        var jointPosPP = headBone.position + headBone.parent.TransformDirection(new Vector3(length, length, 3));
+        var jointPosNP = headBone.position + headBone.parent.TransformDirection(new Vector3(-length, length, 3));
+        var jointPosPN = headBone.position + headBone.parent.TransformDirection(new Vector3(length, -length, 3));
+        var jointPosNN = headBone.position + headBone.parent.TransformDirection(new Vector3(-length, -length, 3));
+        Debug.DrawLine(headBone.position, jointPosPP, Color.blue);
+        Debug.DrawLine(headBone.position, jointPosNP, Color.blue);
+        Debug.DrawLine(headBone.position, jointPosPN, Color.blue);
+        Debug.DrawLine(headBone.position, jointPosNN, Color.blue);
+        Debug.DrawLine(jointPosPP, jointPosNP, Color.blue);
+        Debug.DrawLine(jointPosNP, jointPosNN, Color.blue);
+        Debug.DrawLine(jointPosNN, jointPosPN, Color.blue);
+        Debug.DrawLine(jointPosPN, jointPosPP, Color.blue);
+    }
+    ```
+    ### 眼球追踪(Eye Tracking)
+    接下来我们开始添加眼球追踪的效果，不过先让我们将单骨骼追踪的部分整理好，将其与眼球追踪的部分分离开。
+    ``` c#
+    public class GeckoController : MonoBehaviour
+    {
+        // 被追踪的目标
+        [SerializeField] Transform target;
+        // 守宫颈部骨骼
+        [SerializeField] Transform headBone;
+        // 头部运动速度
+        [SerializeField] float headTrackingSpeed;
+        // 头部最大旋转角度
+        [SerializeField] float headMaxTurnAngle;
+
+        void LateUpdate()
+        {
+            //从靠近根节点的骨骼开始更新
+            HeadTrackingUpdate();
+            EyeTrackingUpdate();
+        }
+
+        void HeadTrackingUpdate() 
+        {
+          ///头部追踪的代码
+        }
+
+        void EyeTrackingUpdate() 
+        {
+          //眼球追踪的代码
+        }
+    }
+    ```
+    这里我们规定眼球绕着各自的Y轴方向移动，并拥有眼球的追踪速度和各自独立的角度限制。
+    ``` c#
+    //左右眼骨骼位置
+    [SerializeField] Transform leftEyeBone;
+    [SerializeField] Transform rightEyeBone;
+
+    //左右眼的运动速度和各自的角度限制。
+    [SerializeField] float eyeTrackingSpeed;
+    [SerializeField] float leftEyeMaxYRotation;
+    [SerializeField] float leftEyeMinYRotation;
+    [SerializeField] float rightEyeMaxYRotation;
+    [SerializeField] float rightEyeMinYRotation;
+    ```
+    使用类似前文头部追踪的方式完成眼球的追踪
