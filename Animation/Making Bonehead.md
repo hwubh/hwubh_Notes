@@ -200,4 +200,11 @@ Debug.DrawLine(headBone.position, headBone.position + headBone.forward * 10, Col
     [SerializeField] float rightEyeMaxYRotation;
     [SerializeField] float rightEyeMinYRotation;
     ```
-    使用类似前文头部追踪的方式完成眼球的追踪
+    使用类似前文头部追踪的方式完成眼球的追踪。，但这里我么希望采用欧拉角的形式来进行角度限制。欧拉角通过记录物体在其自身的三个坐标轴上的旋转来表达其的旋转，这很适合只绕着一个轴旋转的眼球运动。这将允许我们通过仅操作 <a href = "https://docs.unity3d.com/ScriptReference/Transform-localEulerAngles.html">Transform.localEulerAngles</a> 向量的单个分量，在局部空间中轻松限制一个轴上的旋转。
+    >Note: (原文中分享的)关于欧拉角与四元数的一篇<a href = "https://web.archive.org/web/20220412171953/https://developerblog.myo.com/quaternions/">文章</a>。
+    Unity中的“eulerAngles” 和 “localEulerAngles” 都是将欧拉角表达在0~360度之间，不过我们这里将其映射到-180~180度之间。 为此我们需要对介于180~360度之间的角度减去360度以进行矫正。
+    ```C#
+
+    ```
+    ### Two-Bone IK
+    原文中省略了
