@@ -207,4 +207,5 @@ Debug.DrawLine(headBone.position, headBone.position + headBone.forward * 10, Col
 
     ```
     ### Two-Bone IK
-    原文中省略了
+    因为只对肢体的肩，肘，腕三个关节进行IK的计算，这里采用通过三角函数就可以得解的Two-Bone IK。 数学原理上可以参考这篇<a href = "https://zhuanlan.zhihu.com/p/447895503">文章</a>。 
+     
