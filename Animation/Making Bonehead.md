@@ -207,5 +207,5 @@ Debug.DrawLine(headBone.position, headBone.position + headBone.forward * 10, Col
 
     ```
     ### Two-Bone IK
-    因为只对肢体的肩，肘，腕三个关节进行IK的计算，这里采用通过三角函数就可以得解的Two-Bone IK。 数学原理上可以参考这篇<a href = "https://zhuanlan.zhihu.com/p/447895503">文章</a>。 
-     
+    因为只对肢体的肩，肘，腕三个关节进行IK的计算，这里采用通过三角函数就可以得解的Two-Bone IK。 数学原理上可以参考这篇<a href = "https://zhuanlan.zhihu.com/p/447895503">文章</a>。 此外因为肩，肘，腕围成的三角形可能在3维空间存在无数个，所以我们额外引入一个点“Pole”来确定该三角形位于的平面，将解的数量下降为2个，然后再通过规定骨骼在平面的旋转方向得到唯一解。最后在引入点“Effector”作为目标位置。![20241121162158](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241121162158.png)
+    这里将具体的算法分为两个步骤： 首先是移动整个肢体，使“肩-Effector”的连线与“肩-腕”的连线共线。 然后调整肩，肘的旋转，使腕的位置与effector的位置重合。
