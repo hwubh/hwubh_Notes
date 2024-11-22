@@ -204,8 +204,58 @@ Debug.DrawLine(headBone.position, headBone.position + headBone.forward * 10, Col
     >Note: (原文中分享的)关于欧拉角与四元数的一篇<a href = "https://web.archive.org/web/20220412171953/https://developerblog.myo.com/quaternions/">文章</a>。
     Unity中的“eulerAngles” 和 “localEulerAngles” 都是将欧拉角表达在0~360度之间，不过我们这里将其映射到-180~180度之间。 为此我们需要对介于180~360度之间的角度减去360度以进行矫正。
     ```C#
+    // 得到左右眼再局部空间下的绕Y轴的旋转
+    float leftEyeCurrentYRotation = leftEyeBone.localEulerAngles.y;
+    float rightEyeCurrentYRotation = rightEyeBone.localEulerAngles.y;
 
+    // 映射范围外的角度到-180°~180°之间
+    if (leftEyeCurrentYRotation > 180)
+    {
+        leftEyeCurrentYRotation -= 360;
+    }
+    if (rightEyeCurrentYRotation > 180)
+    {
+        rightEyeCurrentYRotation -= 360;
+    }
+
+    // 限制左右眼在局部空间中绕Y轴的旋转
+    float leftEyeClampedYRotation =
+        Mathf.Clamp(
+            leftEyeCurrentYRotation,
+            leftEyeMinYRotation,
+            leftEyeMaxYRotation
+        );
+    float rightEyeClampedYRotation =
+        Mathf.Clamp(
+            rightEyeCurrentYRotation,
+            rightEyeMinYRotation,
+            rightEyeMaxYRotation
+        );
+
+    //更新左右眼在局部空间中绕Y轴的旋转
+    leftEyeBone.localEulerAngles = new Vector3(
+        leftEyeBone.localEulerAngles.x,
+        leftEyeClampedYRotation,
+        leftEyeBone.localEulerAngles.z
+    );
+    rightEyeBone.localEulerAngles = new Vector3(
+        rightEyeBone.localEulerAngles.x,
+        rightEyeClampedYRotation,
+        rightEyeBone.localEulerAngles.z
+    );
     ```
     ### Two-Bone IK
-    因为只对肢体的肩，肘，腕三个关节进行IK的计算，这里采用通过三角函数就可以得解的Two-Bone IK。 数学原理上可以参考这篇<a href = "https://zhuanlan.zhihu.com/p/447895503">文章</a>。 此外因为肩，肘，腕围成的三角形可能在3维空间存在无数个，所以我们额外引入一个点“Pole”来确定该三角形位于的平面，将解的数量下降为2个，然后再通过规定骨骼在平面的旋转方向得到唯一解。最后在引入点“Effector”作为目标位置。![20241121162158](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241121162158.png)
-    这里将具体的算法分为两个步骤： 首先是移动整个肢体，使“肩-Effector”的连线与“肩-腕”的连线共线。 然后调整肩，肘的旋转，使腕的位置与effector的位置重合。
+    因为只对肢体的肩，肘，腕三个关节进行IK的计算，这里采用通过三角函数就可以得解的Two-Bone IK。 数学原理上可以参考这篇<a href = "https://zhuanlan.zhihu.com/p/447895503">文章</a>。 此外因为肩，肘，腕围成的三角形可能在3维空间存在无数个，所以我们额外引入一个点“Pole”来确定该三角形位于的平面，将解的数量下降为2个，然后再通过规定骨骼在平面的旋转方向得到唯一解。最后在引入点“Effector”作为目标位置，根据三角函数求解肩，肘，腕围成的三角形，得到肩，肘的旋转，使腕与effector尽量贴合，。![20241121162158](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241121162158.png)
+    这里将具体的算法分为两个步骤： 首先是计算肩关节的旋转，然后再计算肘关节相对于肩关节的旋转。
+    - 肩关节的旋转：
+      - 首先移动整个肢体： 使用 LookRotation 将肩的局部空间下的正Z方向指向Effector，并且根据从肩到Pole的向量作为局部空间下的Y方向参考，得到绕Z轴的旋转。
+      ``` c#
+        // 世界空间向量：从肩到Pole
+        var r2pTranslation = pivotTransform.position - rootTransform.position;
+        // 世界空间向量：从肩到Effector
+        var r2eTranslation = effectorTransform.position - rootTransform.position;
+        //将肩的局部坐标的正Z方向指向effector, 正y方向与指向pivot的位置的方向相似。换言之，保证肩，pivot，effector三点共面。
+        rootTransform.rotation = Quaternion.LookRotation(r2eTranslation, r2pTranslation);
+      ``` 
+      - 使“肩指向肘”的向量与“肩指向effector”的向量同向：
+      - 计算
