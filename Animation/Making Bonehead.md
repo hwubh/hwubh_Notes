@@ -257,5 +257,5 @@ Debug.DrawLine(headBone.position, headBone.position + headBone.forward * 10, Col
         //将肩的局部坐标的正Z方向指向effector, 正y方向与指向pivot的位置的方向相似。换言之，保证肩，pivot，effector三点共面。
         rootTransform.rotation = Quaternion.LookRotation(r2eTranslation, r2pTranslation);
       ``` 
-      - 使“肩指向肘”的向量与“肩指向effector”的向量同向：
+      - 使“肩指向肘”的向量($\vec{T_K}$)与“肩指向effector”的向量($\vec{T_E}$)同向： 叉乘向量$\vec{T_K}$ , $\vec{T_E}$ 得到二者的旋转轴。如果叉乘结果为0的话， 说明这两个向量为同向/相向的，即二者共面，那么就使用 $\vec{T_E}$与 “肩指向pivot”的向量($\vec{T_P}$)叉乘的结果作为旋转轴。
       - 计算
