@@ -246,16 +246,43 @@ Debug.DrawLine(headBone.position, headBone.position + headBone.forward * 10, Col
     ```
     ### Two-Bone IK
     因为只对肢体的肩，肘，腕三个关节进行IK的计算，这里采用通过三角函数就可以得解的Two-Bone IK。 数学原理上可以参考这篇<a href = "https://zhuanlan.zhihu.com/p/447895503">文章</a>。 此外因为肩，肘，腕围成的三角形可能在3维空间存在无数个，所以我们额外引入一个点“Pole”来确定该三角形位于的平面，将解的数量下降为2个，然后再通过规定骨骼在平面的旋转方向得到唯一解。最后在引入点“Effector”作为目标位置，根据三角函数求解肩，肘，腕围成的三角形，得到肩，肘的旋转，使腕与effector尽量贴合，。![20241121162158](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241121162158.png)
-    这里将具体的算法分为两个步骤： 首先是计算肩关节的旋转，然后再计算肘关节相对于肩关节的旋转。
-    - 肩关节的旋转：
+    这里将具体的算法分为两个步骤： 首先是计算整个手臂的旋转，使肩关节指向target方向。然后计算肩，肘关节的局部旋转。将腕放置在target位置时，“肩-肘-腕”形成的三角形，根据三角形的夹角旋转肩，肘关节。
+    - 整个手臂的旋转：
       - 首先移动整个肢体： 使用 LookRotation 将肩的局部空间下的正Z方向指向Effector，并且根据从肩到Pole的向量作为局部空间下的Y方向参考，得到绕Z轴的旋转。
-      ``` c#
-        // 世界空间向量：从肩到Pole
-        var r2pTranslation = pivotTransform.position - rootTransform.position;
-        // 世界空间向量：从肩到Effector
-        var r2eTranslation = effectorTransform.position - rootTransform.position;
-        //将肩的局部坐标的正Z方向指向effector, 正y方向与指向pivot的位置的方向相似。换言之，保证肩，pivot，effector三点共面。
-        rootTransform.rotation = Quaternion.LookRotation(r2eTranslation, r2pTranslation);
-      ``` 
-      - 使“肩指向肘”的向量($\vec{T_K}$)与“肩指向effector”的向量($\vec{T_E}$)同向： 叉乘向量$\vec{T_K}$ , $\vec{T_E}$ 得到二者的旋转轴。如果叉乘结果为0的话， 说明这两个向量为同向/相向的，即二者共面，那么就使用 $\vec{T_E}$与 “肩指向pivot”的向量($\vec{T_P}$)叉乘的结果作为旋转轴。
-      - 计算
+        ``` c#
+          // 世界空间向量：从肩到Pole
+          var r2pTranslation = pivotTransform.position - rootTransform.position;
+          // 世界空间向量：从肩到Effector
+          var r2eTranslation = effectorTransform.position - rootTransform.position;
+          //将肩的局部坐标的正Z方向指向effector, 正y方向与指向pivot的位置的方向相似。换言之，保证肩，pivot，effector三点共面。
+          rootTransform.rotation = Quaternion.LookRotation(r2eTranslation, r2pTranslation);
+        ``` 
+      - 计算旋转轴Normal： 叉乘向量“肩指向肘”的向量($\vec{T_K}$) , “肩指向effector”的向量($\vec{T_E}$) 得到二者的旋转轴。如果叉乘结果为0的话， 说明这两个向量为同向/相向的，即二者共面，那么就使用 $\vec{T_E}$与 “肩指向pivot”的向量($\vec{T_P}$)叉乘的结果作为旋转轴。
+        ``` c#
+          // 世界空间向量：从肩到肘
+          var t2mTranslation = kneeTransform.position - thighTransform.position;
+          // 世界空间向量：从肩到肘所绕行的旋转轴
+          var normal = Vector3.Cross(t2mTranslation, t2eTranslation).normalized;
+          // 如果二者的叉乘为0，则二者同向或相向。
+          // 因此二者在同一平面上，使用该平面的法线作为旋转轴
+          if (Mathf.Approximately(normal.magnitude, 0f))
+          {
+              normal = Vector3.Cross(t2pTranslation, t2eTranslation).normalized;
+          }
+        ``` 
+      - 使$\vec{T_K}$ 指向 $\vec{T_E}$方向： 使用 <a href = "https://docs.unity3d.com/ScriptReference/Vector3.SignedAngle.html">Vector3.SignedAngle</a>， 传入初始方向($\vec{T_K}$)，目标方向（$\vec{T_E}$），以及旋转轴Normal，可以得到这两个方向所构成的夹角的角度，以及该夹角对应的旋转方向（+/-）。 将Normal从世界空间转换到肩的局部空间中，然后使肩关节绕着Normal旋转上面计算得到的角度。      
+        ``` c#
+          // 计算肩到肘，与肩到effector所构成的夹角
+          var thighRotationAngle = Vector3.SignedAngle(t2mTranslation.normalized, t2eTranslation.normalized, normal);
+          // 忽略精度导致的计算误差
+          if ((t2mTranslation - t2eTranslation).magnitude < 0.01f || Mathf.Abs(thighRotationAngle) < Mathf.PI / 180f)
+              thighRotationAngle = 0f;
+          // 将旋转轴从世界空间转换到肩的局部空间中
+          normal = thighTransform.InverseTransformDirection(normal);
+          // 计算旋转的四元数表达
+          var thighRotation = Quaternion.AngleAxis(thighRotationAngle, normal);
+          // 让肩，肘，effector共线。
+          thighTransform.localRotation *= thighRotation;
+        ``` 
+    - 计算肩，肘关节的局部旋转：
+      - 计算三角形的角度： 首先需要确定“肩->肘”，“肘->腕”，“肩->腕”这三个向量的模长，其中“肩->腕”的模长需要根据前二者的模长进行限制，保证其模长在前二者的差与和之间。
