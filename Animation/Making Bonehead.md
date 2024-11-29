@@ -2,9 +2,11 @@
 ### Unity的程序化动画入门
 
 ## 译者前言
-本文为[WeaverDev](https://weaverdev.io/)撰写的文章[《Making Bonehead》](https://weaverdev.io/projects/bonehead-procedural-animation/) 中文翻译，另外也擅自加上了一些自己学习本文时的一些理解。 因为本人才疏学浅，翻译后文章相较于原文可能存在一些不恰当的用语乃至于错误的地方，还请各位大佬斧正。所以如果可以的话，还请务必对照原文进行参考。 \
-原文工程地址 \
-译者工程地址 (版本为2022.3 LTS) \
+本文为[WeaverDev](https://weaverdev.io/)撰写的文章[《Making Bonehead》](https://weaverdev.io/projects/bonehead-procedural-animation/) 中文翻译，另外也擅自加上了一些自己学习本文时的一些理解。 因为本人才疏学浅，翻译后文章相较于原文可能存在一些不恰当的用语乃至于错误的地方，还请各位大佬斧正。所以如果可以的话，**还请务必对照原文进行参考**。 \
+[原文工程地址](https://github.com/WeaverDev/Bonehead) 
+
+[译者工程地址](https://github.com/hwubh/hwubh_post_code/tree/main/%E5%8A%A8%E7%94%BB%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0_1--Making%20Bonehead) (版本为2022.3 LTS) 
+
 以下是正文：
 
 ## 前言
@@ -37,7 +39,9 @@
 > 译注：关于DynamicBone的算法可以参见这篇[文章: ](https://zhuanlan.zhihu.com/p/522873426)
 
 ## 准备
-首先，你需要某种形式的骨骼结构。 Unity 中默认不区分骨骼和 “transform”， 因此我们可以用一些基本的几何体来构成骨架。 如果你使用现成的骨骼结构，你也可以进行尝试和实验添加新的肢体或改变几何形状。
+首先，你需要某种形式的骨骼结构。 Unity 中默认不区分骨骼和 “transform”， 因此我们可以用一些基本的几何体来构成骨架。 ![hierarchy](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/hierarchy.gif)
+<center>骨骼结构的一个案例</center>
+如果你使用现成的骨骼结构，你也可以进行尝试和实验添加新的肢体或改变几何形状。
 - <a href=https://github.com/WeaverDev/filehost/raw/main/Bonehead%20Tutorial/Bonehead_CapsuleSkeleton.unitypackage>“守宫骨架”</a> - 跟着教程自己写代码.
 - <a href=https://github.com/WeaverDev/Bonehead>“完整工程”</a>  - 完整的工程文件（含代码）.
 > 译注：个人推荐从“完整工程”中取用“Gecko Simple.prefab”, 因为其包含完整的骨架和Mesh。
