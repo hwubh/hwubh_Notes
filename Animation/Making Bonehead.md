@@ -138,13 +138,15 @@
     ```
     ![onebone3](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/onebone3.gif)
 
-  - 角度限制： 我们会使用一个角度值来表示``headbone``所能转动的最大角度。因为是以``headbone``为基准进行判断，我们需要先将目标向量从世界空间下的表达转换到``headbone``的局部空间下再进行判断。 
+  - 角度限制： 我们会使用一个角度值来表示``headbone``所能转动的最大角度。因为是以``headbone``为基准进行判断，我们需要先将目标向量从世界空间下的表达转换到``headbone``的局部空间下再进行判断。
+  ![localspace](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/localspace.gif)  
+    <center>请注意: 当肩膀和肘部旋转时，手在世界坐标中的位置和旋转会发生变化，但它相对于肘部的局部位置和旋转保持不变！</center>
+
+    局部变换是相对于骨骼的父骨骼的，因此需要通过``headbone``的父骨骼来进行变换，（如果是使用``headbone``的话还需要排除``headbone``自身的局部变换）。首先，通过 ``headBone.parent`` 获取头部父对象的引用，然后调用 [``InverseTransformDirection``](https://docs.unity3d.com/ScriptReference/Transform.InverseTransformDirection.html)。这个方法将一个方向从世界空间转换到局部空间。
     ``` C#
     Vector3 targetLocalLookDir = headBone.parent.InverseTransformDirection(targetWorldLookDir);
     ```
-    Unity中提供了函数 <a href = "https://docs.unity3d.com/ScriptReference/Transform.InverseTransformDirection.html">Vector3.RotateTowards</a> 通过传入的四个参数: 初始/结束指向， 最大弧度，最大长度变化，计算出实际的结束指向。 接着根据得到的指向，使用 Quaternion.LookRotation 计算出其对应的3D方向（四元数）。
-    ![onebone4](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/onebone4.gif)
-
+    得到指向目标的向量在``headbone``局部空间的表达后，Unity中提供了函数 <a href = "https://docs.unity3d.com/ScriptReference/Vector3.RotateTowards.html">Vector3.RotateTowards</a> 通过传入的四个参数: 初始/结束指向， 最大弧度，最大长度变化，计算出实际的结束指向。 接着根据得到的指向，使用 ``Quaternion.LookRotation`` 计算出其对应的3D方向（四元数）。
     对应的代码：
     ``` c#
     // 这里的向量表达是在世界坐标下的。
@@ -163,7 +165,7 @@
         currentLcoalRotation, targetLocalRotation,
         1 - Mathf.Exp(-speed * Time.deltaTime));
 
-    //调试代码
+    //调试代码(译者补充的)
     {
         Debug.DrawLine(headBone.position, headBone.position + headBone.forward * 10, Color.red);
         //显示头部的旋转范围
@@ -182,6 +184,7 @@
         Debug.DrawLine(jointPosPN, jointPosPP, Color.blue);
     }
     ```
+    ![onebone4](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/onebone4.gif)
 
   ### 眼球追踪(Eye Tracking)
   接下来我们开始添加眼球追踪的效果，不过先让我们将单骨骼追踪的部分整理好，将其与眼球追踪的部分分离开。
@@ -213,9 +216,11 @@
       {
         //眼球追踪的代码
       }
-  }
+  }  
   ```
-  这里我们规定眼球绕着各自的Y轴方向移动，并拥有眼球的追踪速度和各自独立的角度限制。
+  > ``LateUpadte``中的函数执行顺序是需要注意的。 因为眼部是头部的子骨骼，头部的旋转会影响眼部的位置。所以这里先更新头部再更新眼部。（译注：）越靠近根骨骼的骨骼先更新。
+
+  因为眼球的运动范围是非对称的，这里我们规定眼球绕着各自的Y轴方向移动，并拥有眼球的追踪速度和各自独立的角度限制。
   ``` c#
   //左右眼骨骼位置
   [SerializeField] Transform leftEyeBone;
@@ -228,10 +233,26 @@
   [SerializeField] float rightEyeMaxYRotation;
   [SerializeField] float rightEyeMinYRotation;
   ```
-  使用类似前文头部追踪的方式完成眼球的追踪。，但这里我么希望采用欧拉角的形式来进行角度限制。欧拉角通过记录物体在其自身的三个坐标轴上的旋转来表达其的旋转，这很适合只绕着一个轴旋转的眼球运动。这将允许我们通过仅操作 <a href = "https://docs.unity3d.com/ScriptReference/Transform-localEulerAngles.html">Transform.localEulerAngles</a> 向量的单个分量，在局部空间中轻松限制一个轴上的旋转。
-  >Note: (原文中分享的)关于欧拉角与四元数的一篇<a href = "https://web.archive.org/web/20220412171953/https://developerblog.myo.com/quaternions/">文章</a>。
+  使用类似前文头部追踪的方式使眼球平滑的转向目标方向。
+  ``` C#
+  // 计算目标旋转在世界空间下的表达。
+  // 左右眼均指向“headbone”指向 target的方向。
+  // 左右眼的指向平行，避免斗鸡眼的情况出现。
+  Quaternion targetEyeRotation = Quaternion.LookRotation(target.position - headBone.position, transform.up);
+
+  // 更新左眼的世界空间旋转
+  leftEyeBone.rotation = Quaternion.Slerp(leftEyeBone.rotation, targetEyeRotation, 
+      1 - Mathf.Exp(-eyeTrackingSpeed * Time.deltaTime));
+  // 更新右眼的世界空间旋转
+  rightEyeBone.rotation = Quaternion.Slerp(rightEyeBone.rotation, targetEyeRotation,
+      1 - Mathf.Exp(-eyeTrackingSpeed * Time.deltaTime));
+  ```
+  不同于头部追踪中使用``RotateTowards``进行限制，这里我们采用欧拉角的形式来进行角度限制。欧拉角通过记录物体在其自身的三个坐标轴上的旋转来表达其的旋转，这很适合只绕着一个轴旋转的眼球运动。这将允许我们通过仅操作 <a href = "https://docs.unity3d.com/ScriptReference/Transform-localEulerAngles.html">Transform.localEulerAngles</a> 向量的单个分量，在局部空间中轻松限制一个轴上的旋转。
+  >欧拉角是一种相较于四元数更为直观的旋转的表达形式，但其存在许多四元数没有问题。 关于欧拉角与四元数的一篇<a href = "https://web.archive.org/web/20220412171953/https://developerblog.myo.com/quaternions/">文章</a>。
   Unity中的“eulerAngles” 和 “localEulerAngles” 都是将欧拉角表达在0~360度之间，不过我们这里将其映射到-180~180度之间。 为此我们需要对介于180~360度之间的角度减去360度以进行矫正。
   ```C#
+  // 以下代码放在上个代码片段（旋转眼球的代码）之后
+
   // 得到左右眼再局部空间下的绕Y轴的旋转
   float leftEyeCurrentYRotation = leftEyeBone.localEulerAngles.y;
   float rightEyeCurrentYRotation = rightEyeBone.localEulerAngles.y;
@@ -272,12 +293,16 @@
       rightEyeBone.localEulerAngles.z
   );
   ```
+  ![eyelook](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/eyelook.gif)
   
   ### 两骨骼逆向动力学（Two-Bone IK）
   原文中并没有针对IK进行具体的讲解，而是在<a harf = "https://weaverdev.itch.io/procedural-animation-tutorial">项目源代码</a>中直接提供了一个现成的脚本。这里补充一个简单的IK算法。
   因为只对肢体的肩，肘，腕三个关节进行IK的计算，这里采用通过三角函数就可以得解的Two-Bone IK。 数学原理上可以参考这篇<a href = "https://zhuanlan.zhihu.com/p/447895503">文章</a>。 此外因为肩，肘，腕围成的三角形可能在3维空间存在无数个，所以我们额外引入一个点“Pole”来确定该三角形位于的平面，将解的数量下降为2个，然后再通过规定骨骼在平面的旋转方向得到唯一解。最后在引入点“Effector”作为目标位置，根据三角函数求解肩，肘，腕围成的三角形，得到肩，肘的旋转，使腕与effector尽量贴合，。![20241121162158](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241121162158.png)
-  这里我们需要pole放置在跟肩关节的父节点下，保证pole会随着骨骼整体的移动而移动，但其相对于IK 链上的各个关节则是相对静止的。![20241127162825](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241127162825.png)
-  我们将规定骨骼在平面的旋转方向为逆方向（顺时针）， 故pole会像是吸引着肘关节，使肢体整体向着靠近pole位置的方向弯折
+  <center>Pole与肩膀、肘、腕围成的三角形/线段，要保持在同一平面中</center>
+
+  这里我们将pole放置在跟肩关节的父节点下，保证pole会随着骨骼整体的移动而移动，但其相对于IK 链上的各个关节则是相对静止的。![20241127162825](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241127162825.png) \
+  我们将规定骨骼在平面的旋转方向为逆方向（顺时针）， 故pole会像是吸引着肘关节，使肢体整体向着靠近pole位置的方向弯折。
+  ![20241129113525](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241129113525.png)
   具体的算法分为两个步骤： 首先是计算整个手臂的旋转，使肩关节指向target方向。然后计算肩，肘关节的局部旋转。将腕放置在target位置时，“肩-肘-腕”形成的三角形，根据三角形的夹角旋转肩，肘关节。
   - 整个手臂的旋转：
     - 首先移动整个肢体： 使用 LookRotation 将肩的局部空间下的正Z方向指向Effector，并且根据从肩到Pole的向量作为局部空间下的Y方向参考，得到绕Z轴的旋转。
@@ -302,7 +327,7 @@
             normal = Vector3.Cross(t2pTranslation, t2eTranslation).normalized;
         }
       ``` 
-    - 使$\vec{T_K}$ 指向 $\vec{T_E}$方向： 使用 <a href = "https://docs.unity3d.com/ScriptReference/Vector3.SignedAngle.html">Vector3.SignedAngle</a>， 传入初始方向($\vec{T_K}$)，目标方向（$\vec{T_E}$），以及旋转轴Normal，可以得到这两个方向所构成的夹角的角度，以及该夹角对应的旋转方向（+/-）。 将Normal从世界空间转换到肩的局部空间中，然后使肩关节绕着Normal旋转上面计算得到的角度。      
+    - 使$\vec{T_K}$ 指向 $\vec{T_E}$方向： 使用 <a href = "https://docs.unity3d.com/ScriptReference/Vector3.SignedAngle.html">Vector3.SignedAngle</a>， 传入初始方向($\vec{T_K}$)，目标方向（$\vec{T_E}$），以及旋转轴Normal，可以得到这两个方向所构成的夹角的角度，以及该夹角对应的旋转方向（顺/逆时针）。 将Normal从世界空间转换到肩的局部空间中，然后使肩关节绕着Normal旋转上面计算得到的角度。      
       ``` c#
         // 计算肩到肘，与肩到effector所构成的夹角
         var thighRotationAngle = Vector3.SignedAngle(t2mTranslation.normalized, t2eTranslation.normalized, normal);
@@ -318,29 +343,29 @@
       ``` 
   - 计算肩，肘关节的局部旋转：
     - 计算三角形的角度： 首先需要确定“肩->肘”，“肘->腕”，“肩->腕”这三个向量的模长，其中“肩->腕”的模长需要根据前二者的模长进行限制，保证其模长在前二者的差与和之间。    
-    ```C#
-      // 世界空间向量：从肘到腕
-      var k2tTranslation = ankleTransform.position - kneeTransform.position;
-      // 肩到肘的线段长度
-      var t2mLength = t2mTranslation.magnitude;
-      // 肘到腕的线段长度
-      var k2tLength = k2tTranslation.magnitude;
-      // 肩到effector的线段长度需要介于另两边的和与差之间
-      var eps = 0.00001f;
-      var t2eLength = Mathf.Clamp(t2eTranslation.magnitude, Mathf.Abs(t2mLength - k2tLength) + eps, t2mLength + k2tLength - eps);
-    ```
-    接着就可以根据余弦定理计算三角形的夹角
-    ```C#
-      // 计算腕->肩->肘构成的角度，即肩部要旋转的角度
-      var a2t2mAngle = Mathf.Acos(Mathf.Clamp((t2mLength * t2mLength + t2eLength * t2eLength - k2tLength * k2tLength)
-                                      / (2 * t2mLength * t2eLength), -1, 1));
-      // 计算肩->肘->腕构成的角度的补角，即肘部要旋转的角度
-      var t2k2tAngle = Mathf.PI - Mathf.Acos(Mathf.Clamp((t2mLength * t2mLength + k2tLength * k2tLength - t2eLength * t2eLength)
-                              / (2 * t2mLength * k2tLength), -1, 1));
-    ```
+      ```C#
+        // 世界空间向量：从肘到腕
+        var k2tTranslation = ankleTransform.position - kneeTransform.position;
+        // 肩到肘的线段长度
+        var t2mLength = t2mTranslation.magnitude;
+        // 肘到腕的线段长度
+        var k2tLength = k2tTranslation.magnitude;
+        // 肩到effector的线段长度需要介于另两边的和与差之间
+        var eps = 0.00001f;
+        var t2eLength = Mathf.Clamp(t2eTranslation.magnitude, Mathf.Abs(t2mLength - k2tLength) + eps, t2mLength + k2tLength - eps);
+      ```
+      接着就可以根据余弦定理计算三角形的夹角
+      ```C#
+        // 计算腕->肩->肘构成的角度，即肩部要旋转的角度
+        var a2t2mAngle = Mathf.Acos(Mathf.Clamp((t2mLength * t2mLength + t2eLength * t2eLength - k2tLength * k2tLength)
+                                        / (2 * t2mLength * t2eLength), -1, 1));
+        // 计算肩->肘->腕构成的角度的补角，即肘部要旋转的角度
+        var t2k2tAngle = Mathf.PI - Mathf.Acos(Mathf.Clamp((t2mLength * t2mLength + k2tLength * k2tLength - t2eLength * t2eLength)
+                                / (2 * t2mLength * k2tLength), -1, 1));
+      ```
     - 计算旋转轴，旋转肩，轴关节： 规定从pole旋转到effector的方向为正方向，所以使用"肩->pole"叉乘"肩->effector"得到旋转轴。 因为希望肘与pole在同一侧，所以这里肩关节逆着旋转轴旋转。
-      ![20241127155653](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241127155653.png)
-      将肘关节的局部旋转置零（即肘到腕的向量与肩到肘的向量同向），然后再逆着刚才肩关节的旋转方向，旋转由肩->肘->腕构成的角度的补角。
+      ![20241129114402](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241129114402.png)
+      将肘关节的局部旋转置零（即“肘到腕的向量”与“肩到肘的向量”同向），然后再逆着刚才肩关节的旋转方向，旋转由肩->肘->腕构成的角度的补角。
       ```C#
       // 规定从pole旋转到effector的方向为角度的正方向
       normal = Vector3.Cross(t2pTranslation, t2eTranslation).normalized;
@@ -363,156 +388,161 @@
       kneeTransform.rotation = thighTransform.rotation * k2tRotation;
       ```
       ![legik](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/legik.gif)
+       <center>Pole的位置（球）， 和 effector的位置（正方体）。 Pole位于根骨骼下，会随着骨骼整体的移动而移动。</center>
   
   ### 迈步(Leg Stepping)
-  守宫的步态循环相较于人物的行走使较为简单的，因此我们完全使用一个简单的脚本来完成从A点到B点的运动。而后者往往会使用关键帧（动画）来控制身体的姿态，只有在落脚处采用了程序化动画。
-  为了确定落脚点，我们为肢体各设置一个“原点位置”。其位于我们落脚点可以触及的范围的中心，与pole一样与肩关节保持相对静止。此外我们还会将其用于脚的旋转，因此需要将其定向为脚在静止状态下应有的朝向。？？
-  ![homepos](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/homepos.gif)
+  守宫的步态循环相较于人物的行走是较为简单的，因此我们可以使用一个简单的脚本来完成从A点到B点的运动。而后者往往会使用关键帧（动画）来控制身体的姿态，只有在落脚处采用了程序化动画。 \
+  本文中为了确定落脚点，我们为肢体各设置一个“原点(home)位置”。其位于我们落脚点可以触及的范围的中心，与pole一样与肩关节保持相对静止。此外我们还会将其用于脚的旋转，因此需要将其定向为脚在静止状态下应有的朝向。
+  ![homepos](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/homepos.gif) \
   我们会根据“原点位置”决定何时何地移动effector，而当肢体超出了我们圈定的范围时，则会触发一步回到“原点位置”的动作。
-  首先在创建一个叫 LegStepper 的脚本来处理相关的逻辑，其参数包含 “原点位置” 和其对应的effector的位置。
+  首先创建一个叫 ``LegStepper`` 的脚本来处理相关的逻辑，其参数包含 “原点位置” 和其对应的effector的位置。
   ``` c#
-  // “原点”和effector的Transforms。
-  public List<Transform> homeTransforms;
-  public List<Transform> effectorTransfroms;
-  // 以“原点”为中心圈定的范围的半径
-  // 即肢体可以离开“原点”的最大距离
-  [SerializeField] float wantStepAtDistance;
-  // 每一步需要花费多长时间完成
-  [SerializeField] float moveDuration;
-  // 是否正在移动
-  private List<bool> Movings = new List<bool>();
-  ```
-  因为步伐不应该是瞬时的，我们使用协程将这一运动过程进行分帧处理，使之逐步的接近目标。
-  以下代码使肢体从现在的位置，旋转经过 “moveDuration” 长的时间移动到“原点”的位置，旋转。
-  ``` c#
-  IEnumerator MoveToHome(int i)
+  using UnityEngine;
+
+  public class LegStepper : MonoBehaviour
   {
-      Transform effectorTransfrom = effectorTransfroms[i];
-      Transform homeTransform = homeTransforms[i];
-
-      // 表明正在移动中
-      // 肢体正在执行一个协程，避免重复创建与冲突
-      Movings[i] = true;
-
-      // 保存初始数据
-      Quaternion startRot = effectorTransfrom.rotation;
-      Vector3 startPos = effectorTransfrom.position;
-
-      Quaternion endRot = homeTransform.rotation;
-      Vector3 endPos = homeTransform.position + overshootVector;
-
-      // 步伐开始的时间
-      float timeElapsed = 0;
-      // 这里使用了do-loop结构，normalizedTime在最后一次循环时会超过1。原文中担心这会导致错误的结果，
-      // 但Unity提供的Vector3.Lerp，Quaternion.Slerp会对传入的normalizedTime做clamp01操作，所以不用做额外的操作。
-      do
-      {
-        // 添加上一帧到目前经过了的时间
-        timeElapsed += Time.deltaTime;
-
-        float normalizedTime = timeElapsed / moveDuration;
-        normalizedTime = Easing.Cubic.InOut(normalizedTime);
-
-        effectorTransfrom.position = Vector3.Lerp
-            ( Vector3.Lerp(startPos, centrePos, normalizedTime),
-              Vector3.Lerp(centrePos, endPos, normalizedTime),
-              normalizedTime
-            );
-        effectorTransfrom.rotation = Quaternion.Slerp(startRot, endRot, normalizedTime);
-
-        // 等待到下一帧继续执行
-        yield return null;
-      }
-      while (timeElapsed < moveDuration);
-
-      // 结束移动
-      Movings[i] = false;
+    // "原点" 的位置与旋转
+    [SerializeField] Transform homeTransform;
+    // 以“原点”为中心圈定的范围的半径
+    // 即肢体可以离开“原点”的最大距离
+    [SerializeField] float wantStepAtDistance;
+    // 每一步需要花费多长时间完成
+    [SerializeField] float moveDuration;
+    
+    // 是否正在移动
+    public bool Moving;
   }
   ```
-  为了触发上面的协程，我们在Update中对肢体到原点的距离进行检测，当肢体在范围外时触发。
+  因为步伐不应该是瞬时的，我们使用协程将这一运动过程进行分帧处理，使之逐步的接近目标。
+  以下代码使肢体从现在的位置，旋转经过 ``moveDuration`` 长的时间移动到“原点”的位置，旋转。
   ``` c#
-  // 如果正在移动，不另外开启协程
-  if (Movings[i])
-      return;
-
-  if (effectorTransfroms?[i] == null)
-      return;
-
-  float distFromHome = Vector3.Distance(effectorTransfroms[i].position, homeTransforms[i].position);
-
-  // 如果肢体超过了范围
-  if (distFromHome > wantStepAtDistance)
+  // 协程需要返回IEnumerator对象
+  IEnumerator MoveToHome()
   {
-      // 开始移动（创建协程）
-      StartCoroutine(MoveToHome(i));
+    // 表明正在移动中
+    // 肢体正在执行一个协程，避免重复创建与冲突
+    Moving = true;
+
+    // 保存初始数据
+    Quaternion startRot = transform.rotation;
+    Vector3 startPoint = transform.position;
+
+    Quaternion endRot = homeTransform.rotation;
+    Vector3 endPoint = homeTransform.position;
+
+    // 步伐开始的时间
+    float timeElapsed = 0;
+
+    // 这里使用了do-loop结构，normalizedTime在最后一次循环时会超过1。原文中担心这会导致错误的结果，
+    // 但Unity提供的Vector3.Lerp，Quaternion.Slerp会对传入的normalizedTime做clamp01操作，所以不用做额外的操作。
+    do
+    {
+      // 添加上一帧到目前经过了的时间
+      timeElapsed += Time.deltaTime;
+
+      float normalizedTime = timeElapsed / moveDuration;
+
+      // 插值得到当前帧所在的位置
+      transform.position = Vector3.Lerp(startPoint, endPoint,normalizedTime);
+      transform.rotation = Quaternion.Slerp(startRot, endRot, normalizedTime);
+
+      // 等待到下一帧继续执行
+      yield return null;
+    }
+    while (timeElapsed < moveDuration);
+
+    // 结束移动
+    Moving = false;
+  }
+  ```
+  为了触发上面的协程，我们在``Update``中对肢体到原点的距离进行检测，当肢体在范围外时触发。
+  ``` c#
+  void Update()
+  {
+    // 如果正在移动，不另外开启协程
+    if (Moving) return;
+
+    float distFromHome = Vector3.Distance(transform.position, homeTransform.position);
+
+    // 如果肢体超过了范围
+    if (distFromHome > wantStepAtDistance)
+    {
+        // 开始移动（创建协程）
+        StartCoroutine(MoveToHome());
+    }
   }
   ```
   ![step](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/step.gif) \
-  为了使动作更加生动， 可以尝试将肢体稍微抬起，离开地面一些。并且在动作幅度较大时，并不是正好落在“原点”上。为此我们可以使用嵌套的线性插值实现的二次贝塞尔曲线来模拟运动轨迹。
+  为了使动作更加生动， 可以尝试将肢体稍微抬起，离开地面一些。并且在动作幅度较大时，不是正好落在“原点”上, 而是略微偏离一些。为此我们可以使用嵌套的线性插值实现的二次贝塞尔曲线来模拟运动轨迹。
   ``` c#
-  IEnumerator MoveToHome(int i)
+  // 新的变量
+  // 超出"原点"最大距离的比例。
+  [SerializeField] float stepOvershootFraction;
+
+  IEnumerator Move()
   {
-      Transform effectorTransfrom = effectorTransfroms[i];
-      Transform homeTransform = homeTransforms[i];
+    Moving = true;
 
-      // 表明正在移动中
-      // 肢体正在执行一个协程，避免重复创建与冲突
-      Movings[i] = true;
+    Vector3 startPoint = transform.position;
+    Quaternion startRot = transform.rotation;
 
-      // 保存初始数据
-      Quaternion startRot = effectorTransfrom.rotation;
-      Vector3 startPos = effectorTransfrom.position;
+    Quaternion endRot = homeTransform.rotation;
 
-      Quaternion endRot = homeTransform.rotation;
+    // 世界空间向量：从effector到“原点”的向量
+    Vector3 towardHome = (homeTransform.position - transform.position);
+    // 计算过冲向量
+    float overshootDistance = wantStepAtDistance * stepOvershootFraction;
+    Vector3 overshootVector = towardHome * overshootDistance;
+    // 将过冲向量投影在地面上（XZ平面）
+    // 计算过冲向量在XZ方向的偏移，
+    overshootVector = Vector3.ProjectOnPlane(overshootVector, Vector3.up);
 
-      // 计算过冲向量在XZ方向的偏移
-      Vector3 towardHome = (homeTransform.position - effectorTransfrom.position);
-      float overshootDistance = wantStepAtDistance * stepOvershootFraction;
-      Vector3 overshootVector = towardHome * overshootDistance;
-      overshootVector = Vector3.ProjectOnPlane(overshootVector, Vector3.up);
+    // 在原点位置上加上过冲带来的偏移
+    Vector3 endPoint = homeTransform.position + overshootVector;
 
-      // 在原点位置位置上加上过冲带来的偏移
-      Vector3 endPos = homeTransform.position + overshootVector;
+    // 计算运动轨迹的中点
+    // 在Y方向上加上一些偏移，使步伐抬起移动距离的一半
+    Vector3 centerPoint = (startPoint + endPoint) / 2;
+    centerPoint += homeTransform.up * Vector3.Distance(startPoint, endPoint) / 2f;
 
-      // 计算运动轨迹的中点
-      // 在Y方向上加上一些偏移，使步伐挑起移动距离的一半
-      Vector3 centrePos = (startPos + endPos) / 2;
-      centrePos += Vector3.up * Vector3.Distance(startPos, endPos) / 2f;
+    // 步伐开始的时间 
+    float timeElapsed = 0;
+    // 这里使用了do-loop结构，normalizedTime在最后一次循环时会超过1。原文中担心这会导致错误的结果，
+    // 但Unity提供的Vector3.Lerp，Quaternion.Slerp会对传入的normalizedTime做clamp01操作，所以不用做额外的操作。
+    do
+    {
+      timeElapsed += Time.deltaTime;
+      float normalizedTime = timeElapsed / moveDuration;
 
-      // 步伐开始的时间
-      float timeElapsed = 0;
-      // 这里使用了do-loop结构，normalizedTime在最后一次循环时会超过1。原文中担心这会导致错误的结果，
-      // 但Unity提供的Vector3.Lerp，Quaternion.Slerp会对传入的normalizedTime做clamp01操作，所以不用做额外的操作。
-      do
-      {
-          timeElapsed += Time.deltaTime;
+      // 二次贝塞尔曲线
+      transform.position =
+        Vector3.Lerp(
+          Vector3.Lerp(startPoint, centerPoint, normalizedTime),
+          Vector3.Lerp(centerPoint, endPoint, normalizedTime),
+          normalizedTime
+        );
 
-          float normalizedTime = timeElapsed / moveDuration;
+      transform.rotation = Quaternion.Slerp(startRot, endRot, normalizedTime);
 
-          // 二次贝塞尔曲线
-          effectorTransfrom.position = Vector3.Lerp
-              ( Vector3.Lerp(startPos, centrePos, normalizedTime),
-                Vector3.Lerp(centrePos, endPos, normalizedTime),
-                normalizedTime
-              );
-          effectorTransfrom.rotation = Quaternion.Slerp(startRot, endRot, normalizedTime);
+      // 等待到下一帧继续执行
+      yield return null;
+    }
+    while (timeElapsed < moveDuration);
 
-          // 等待到下一帧继续执行
-          yield return null;
-      }
-      while (timeElapsed < moveDuration);
-
-      // 结束移动
-      Movings[i] = false;
+    // 结束移动
+    Moving = false;
   }
   ```
-  ![step2](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/step2.gif) \
+  ![step2](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/step2.gif)
+    <center>使用二次贝塞尔曲线控制运动轨迹</center> 
   但这动作看起来还是有些平淡。最后让我们为动作添加一些<a herf = "https://easings.net/en">缓动(Easing)</a>效果。 实现缓动的方法有很多，这里提供其中<a href = "https://gist.github.com/Fonserbc/3d31a25e87fdaa541ddf">一种</a>。 确定好方法后，便可将 ``normalizedTime`` 传入缓动函数中从而作用于步伐上。
   ![step3-1](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/step3-1.gif)
-  看起来不错，但还是有些问题存在。 因为各个肢体是独自控制其自身的移动状态的，因此可以存在太多肢体同时腾空的情况。
-  ![step4](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/step4.gif)
+  <center>加上缓动之后</center>
+  看起来不错，但还是有些问题存在。 因为各个肢体是独自控制其自身的移动状态的，因此可能存在太多肢体同时腾空的情况。
+
+  ![step4](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/step4.gif)   <center>四肢各自控制其运动</center>
   为了解决这个问题，我们可以统一管理这些肢体。 只有处于对角线上的一对肢体(左前-右后， 右前-左后)会同时进行移动。
-  目前肢体是否移动是在 LegStepper's 的``Update()``检测的，我们可以转而在 ``GeckoController``脚本中实现。 为此，首先将``Update()``中的代码提取成一个公共函数``public void TryMove()``。
+  目前肢体是否移动是在类LegStepper的 ``Update()`` 中检测的，我们可以转而在 ``GeckoController`` 脚本中实现。 为此，首先将 ``Update()`` 中的代码提取成一个public函数 ``public void TryMove()``。
   ``` c#
   // 之前void Update()中的代码
   public void TryMove()
@@ -568,6 +598,14 @@
   > 上述代码在守宫移动过快时可能导致其中一对肢体一直腾空。 
 
   最后在``GeckoController``的 ``Awake``函数中创建刚刚实现的协程函数。
+  ``` C#
+  void Awake()
+  {
+      StartCoroutine(LegUpdateCoroutine());
+  }
+  ```
+  ![step5](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/step5.gif)
+  <center>只有对角线上的一对肢体同时在移动</center>
 
   ### 整体运动(Root Motion)
   因为我们的动画系统可以独立的对世界做出反应，我们可以其视为一个单一的个体，而不需要考虑四肢或其他细枝末节，在世界空间中轻松地移动守宫。
