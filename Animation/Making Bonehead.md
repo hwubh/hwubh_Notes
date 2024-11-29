@@ -608,9 +608,9 @@
   <center>只有对角线上的一对肢体同时在移动</center>
 
   ### 整体运动(Root Motion)
-  因为我们的动画系统可以独立的对世界做出反应，我们可以其视为一个单一的个体，而不需要考虑四肢或其他细枝末节，在世界空间中轻松地移动守宫。
+  因为我们的动画系统以及可以独立地对世界做出反应，我们可以其视为一个单一的个体，而不需要考虑四肢或其他细枝末节，在世界空间中轻松地移动整只守宫。
   接下来我们会通过速度来控制守宫整体的位移与旋转。为此需要确认一个*目标速度*，平滑地将*当前速度*过渡到*目标速度*， 并将其应用在守宫上。
-  让我们在``GeckoController``类实现。首先，设置我们将使用的一些参数，变量
+  让我们在``GeckoController``类中实现。首先，设置我们将使用的一些参数，变量
   ``` C#
   // 最大的角速率，移动速率
   [SerializeField] float turnSpeed;
@@ -630,7 +630,7 @@
   // 因为只绕着垂直向上的轴旋转，所以只是一个float。
   float currentAngularVelocity;
   ```
-  如同我们在头部追踪上的实现，我们也可以使用平滑函数当接近目标速度时。首先，我们先将守宫的身体转向目标。
+  如同我们在头部追踪上的实现，我们也可以使用平滑函数来控制速度的变化，使之自然地过渡到目标速度。首先，我们先将守宫的身体转向目标。
   ``` C#
   void RootMotionUpdate()
   {
@@ -670,7 +670,7 @@
   }
   ```
   ![turning](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/turning.gif) \
-  接下来还需要处理位移，我们根据参数最大，最小距离来将守宫与目标保持在一定的范围内。当距离过大时靠近，距离过小时则是远离。
+  接下来还需要处理位移，我们根据参数``minDistToTarget``, ``maxDistToTarget``将守宫与目标保持在一定的范围内。当距离过大时靠近，距离过小时则远离。
   ``` C#
   //// 放在RootMotionUpdate函数中， 旋转相关的代码后面 ////
   Vector3 targetVelocity = Vector3.zero;
@@ -701,8 +701,7 @@
   // 加上计算这一帧的位移
   transform.position += currentVelocity * Time.deltaTime;
   ```
-  最后别忘了在 ``LateUpdate()`` 中加上 ``RootMotionUpdate()``。 因为头部追踪依赖整体的方向，所以要将
-  ``RootMotionUpdate()``放在第一项。
+  最后别忘了在 ``LateUpdate()`` 中加上 ``RootMotionUpdate()``。 因为头部追踪依赖整体的方向，所以要将``RootMotionUpdate()``放在第一项。
   ```C#
   void LateUpdate()
   {
@@ -712,9 +711,11 @@
   }
   ```
 
-  ### 
-
 ## 结语
 尽管还有许多可以改进的地方，但这个教程总得有个结束。这只是纯骨骼控制的入门介绍，然而程序化动画的一个重要部分是建立在关键帧动画的基础上，我们可能会在未来的教程中进一步探讨这一点。
 ![ravenlook](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/ravenlook.gif)
+<center>头部追踪加上待机(Idle)动画</center>
 更多关于这方面的资料，可以参考David Rosen关于复仇格斗兔2（*Overgrowth*）中的程序化动画系统的[GDC 演讲: 《Animation Bootcamp: An Indie Approach to Procedural Animation》](https://www.youtube.com/watch?v=LNidsMesxSE), 以及Joar Jakobsson和James Therrien的关于雨世界（*Rain World*）使用的程序化动画的[演讲： 《The Rain World Animation Process》](https://www.youtube.com/watch?v=sVntwsrjNe4)
+
+![bonehead](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/bonehead.gif)
+<center>谢谢</center>
