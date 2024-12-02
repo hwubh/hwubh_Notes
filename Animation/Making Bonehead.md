@@ -131,13 +131,13 @@
     因为我们的关节是通过旋转来改变(子关节的)位移的，我们需要使用四元数来表达。不过因为四元数为旋转，这里使用<a href = "https://discussions.unity.com/t/what-is-the-difference-of-quaternion-slerp-and-lerp/453377/19">Slerp</a>代替Lerp。从而得到我们代码实际使用的内容。
     ``` c#
     Quaternion targetRotation = Quaternion.LookRotation(
-    towardObjectFromHead, 
-    transform.up
+      towardObjectFromHead, 
+      transform.up
     );
     headBone.rotation = Quaternion.Slerp(
-    headBone.rotation, 
-    targetRotation, 
-    1 - Mathf.Exp(-speed * Time.deltaTime)
+      headBone.rotation, 
+      targetRotation, 
+      1 - Mathf.Exp(-speed * Time.deltaTime)
     );
     ```
     ![onebone3](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/onebone3.gif)
