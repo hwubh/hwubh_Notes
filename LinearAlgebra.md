@@ -12,3 +12,4 @@
   - 求特征值： 通过行列式。![20241217181417](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241217181417.png)
   - diagonal matrix： 所有基坐标轴都是特征向量，对角线上的值即为特征值。![20241217181818](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241217181818.png)
   - 多次幂的矩阵运算可以先将特征向量作为基坐标轴来处理。
+- 矩阵向量乘法与求导： 只要满足了向量加法和数乘的规则，就属于向量空间。 ![20241218111700](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241218111700.png)![20241218112158](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241218112158.png)
