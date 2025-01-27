@@ -1,0 +1,4 @@
+﻿  EmbreeTest.cpp
+C:\Learning\hwubh_Notes\Embree\EmbreeTest\EmbreeTest\EmbreeTest.cpp(97,23): warning C4267: “=”: 从“size_t”转换到“uint32_t”，可能丢失数据
+C:\Learning\hwubh_Notes\Embree\EmbreeTest\EmbreeTest\EmbreeTest.cpp(332,12): error C2059: 语法错误:“)”
+C:\Learning\hwubh_Notes\Embree\EmbreeTest\EmbreeTest\EmbreeTest.cpp(333,5): error C2143: 语法错误: 缺少“;”(在“{”的前面)
