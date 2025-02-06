@@ -34,6 +34,8 @@ inline void EmbreeErorrHandler(void* userPtr, RTCError code, const char* str) {
 	printf("Embree Error [%d] %s\n", code, str);
 }
 
+int index = 0;
+
 class BVHBranch;
 class BVHLeaf;
 
@@ -71,6 +73,7 @@ static void* create_branch(RTCThreadLocalAllocator alloc, unsigned int numChildr
 	// direct "BVHBranch *" to "void *" cast maybe cause undefined behavior when "void *" to "BVHNode *"
 	// so "BVHBranch *" to "BVHNode *"
 	BVHNode* node = new (ptr) BVHBranch;
+    node->index_for_array_storage = index++;
 	return (void*)node;
 }
 static void set_children_to_branch(void* nodePtr, void** childPtr, unsigned int numChildren, void* userPtr)
@@ -183,7 +186,11 @@ void print_node(BVHNode* node)
     if (node->branch() != nullptr) 
     {
         BVHBranch* nodeBranch = node->branch();
+        if(nodeBranch->parent != nullptr)
+            std::cout << "Parent index is: " << nodeBranch->parent->index_for_array_storage << std::endl;
         std::cout << "nodeBranch index is: " << nodeBranch->index_for_array_storage << std::endl;
+        std::cout << "LeftNode index is: " << nodeBranch->L->index_for_array_storage << std::endl;
+        std::cout << "RightNode index is: " << nodeBranch->R->index_for_array_storage << std::endl << "\n" << std::endl;
         print_node(nodeBranch->L);
         print_node(nodeBranch->R);
     }
@@ -191,7 +198,9 @@ void print_node(BVHNode* node)
     if (node->leaf() != nullptr)
     {
         BVHLeaf* nodeLeaf = node->leaf();
-        std::cout << "nodeLeaf index is: " << nodeLeaf->index_for_array_storage << std::endl;
+        std::cout << "Parent index is: " << nodeLeaf->parent->index_for_array_storage << std::endl;
+        std::cout << "NodeLeaf prim is: " << nodeLeaf->primitive_ids[0]  << "\n" << std::endl;
+        //std::cout << "\n NodeLeaf prim is: " << nodeLeaf->primitive_ids[0] << std::endl;
     }
 }
 
@@ -222,7 +231,7 @@ int main() {
     prims[1].lower_y = -0.5f;
     prims[1].lower_z = 0.5f;
     prims[1].geomID = 0;
-    prims[1].primID = 0;
+    prims[1].primID = 1;
     prims[1].upper_x = 0.5f;
     prims[1].upper_y = 0.5f;
     prims[1].upper_z = 0.5f;
@@ -231,7 +240,7 @@ int main() {
     prims[2].lower_y = 0.5f;
     prims[2].lower_z = -0.5f;
     prims[2].geomID = 0;
-    prims[2].primID = 0;
+    prims[2].primID = 2;
     prims[2].upper_x = 0.5f;
     prims[2].upper_y = 0.5f;
     prims[2].upper_z = 0.5f;
@@ -240,7 +249,7 @@ int main() {
     prims[3].lower_y = 0.5f;
     prims[3].lower_z = -0.5f;
     prims[3].geomID = 0;
-    prims[3].primID = 0;
+    prims[3].primID = 3;
     prims[3].upper_x = 0.5f;
     prims[3].upper_y = 0.5f;
     prims[3].upper_z = 0.5f;
@@ -249,7 +258,7 @@ int main() {
     prims[4].lower_y = -0.5f;
     prims[4].lower_z = -0.5f;
     prims[4].geomID = 0;
-    prims[4].primID = 0;
+    prims[4].primID = 4;
     prims[4].upper_x = 0.5f;
     prims[4].upper_y = 0.5f;
     prims[4].upper_z = -0.5f;
@@ -258,7 +267,7 @@ int main() {
     prims[5].lower_y = -0.5f;
     prims[5].lower_z = -0.5f;
     prims[5].geomID = 0;
-    prims[5].primID = 0;
+    prims[5].primID = 5;
     prims[5].upper_x = 0.5f;
     prims[5].upper_y = 0.5f;
     prims[5].upper_z = -0.5f;
@@ -267,7 +276,7 @@ int main() {
     prims[6].lower_y = -0.5f;
     prims[6].lower_z = -0.5f;
     prims[6].geomID = 0;
-    prims[6].primID = 0;
+    prims[6].primID = 6;
     prims[6].upper_x = 0.5f;
     prims[6].upper_y = -0.5f;
     prims[6].upper_z = 0.5f;
@@ -276,7 +285,7 @@ int main() {
     prims[7].lower_y = -0.5f;
     prims[7].lower_z = -0.5f;
     prims[7].geomID = 0;
-    prims[7].primID = 0;
+    prims[7].primID = 7;
     prims[7].upper_x = 0.5f;
     prims[7].upper_y = -0.5f;
     prims[7].upper_z = 0.5f;
@@ -285,7 +294,7 @@ int main() {
     prims[8].lower_y = -0.5f;
     prims[8].lower_z = -0.5f;
     prims[8].geomID = 0;
-    prims[8].primID = 0;
+    prims[8].primID = 8;
     prims[8].upper_x = -0.5f;
     prims[8].upper_y = 0.5f;
     prims[8].upper_z = 0.5f;
@@ -294,7 +303,7 @@ int main() {
     prims[9].lower_y = -0.5f;
     prims[9].lower_z = -0.5f;
     prims[9].geomID = 0;
-    prims[9].primID = 0;
+    prims[9].primID = 9;
     prims[9].upper_x = -0.5f;
     prims[9].upper_y = 0.5f;
     prims[9].upper_z = 0.5f;
@@ -303,7 +312,7 @@ int main() {
     prims[10].lower_y = -0.5f;
     prims[10].lower_z = -0.5f;
     prims[10].geomID = 0;
-    prims[10].primID = 0;
+    prims[10].primID = 10;
     prims[10].upper_x = 0.5f;
     prims[10].upper_y = 0.5f;
     prims[10].upper_z = 0.5f;
@@ -312,7 +321,7 @@ int main() {
     prims[11].lower_y = -0.5f;
     prims[11].lower_z = -0.5f;
     prims[11].geomID = 0;
-    prims[11].primID = 0;
+    prims[11].primID = 11;
     prims[11].upper_x = 0.5f;
     prims[11].upper_y = 0.5f;
     prims[11].upper_z = 0.5f;
@@ -349,15 +358,16 @@ int main() {
     }
 
     BVHNode* blasBVHTest = blasBVH;
-    while (blasBVHTest->branch() != nullptr || blasBVHTest->leaf() != nullptr)
-    {
-        BVHBranch* nodeBranch;
-        BVHLeaf* nodeLeaf;
-        if (blasBVHTest->branch() != nullptr)
-            nodeBranch = blasBVHTest->branch();
-        std::cout << "blasBVHTest branch is: " << blasBVHTest->index_for_array_storage << std::endl;
-        blasBVHTest = (BVHBranch*) blasBVHTest->branch();
-    }
+    print_node(blasBVHTest);
+    //while (blasBVHTest->branch() != nullptr || blasBVHTest->leaf() != nullptr)
+    //{
+    //    BVHBranch* nodeBranch;
+    //    BVHLeaf* nodeLeaf;
+    //    if (blasBVHTest->branch() != nullptr)
+    //        nodeBranch = blasBVHTest->branch();
+    //    std::cout << "blasBVHTest branch is: " << blasBVHTest->index_for_array_storage << std::endl;
+    //    blasBVHTest = (BVHBranch*) blasBVHTest->branch();
+    //}
 
     // 创建 TLAS
     //RTCScene tlasScene = rtcNewScene(device);
