@@ -46,3 +46,4 @@
     - target 和 end 的值很小时，也容易造成扰动(计算的角度过大![20241112162434](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241112162434.png))
   - 万向节死锁？
     - 直接旋转Transform.Rotation好像不太行，先将Normal转换到局部空间内再计算局部的旋转。![20241112154515](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20241112154515.png)
+  - 顺序问题： IK计算角度 -> 修正误差（如Hinge上需避免旋转轴发生移动） -》 角度限制（放最后防止插值时出现不希望存在的角度）

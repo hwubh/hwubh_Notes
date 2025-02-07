@@ -86,3 +86,7 @@
     - 解决方式：对采样的历史帧和当前帧数据进行对比，将历史帧数据 clamp/截断 在合理的范围内：读取当前帧数据目标像素周围 5 个或 9 个像素点的Max，Min值作为范围。然后：clamp或clip；在TAA之后进行一次滤波（低通），虽然可以有效减少闪烁，但是会让画面比较模糊。
     - 混合：使用一个可变化的混合系数值来平衡抖动和模糊的效果，当物体的 Motion Vector 值比较大时，就增大 blendFactor 的值，反之则减小![20240625015835](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240625015835.png)
   - https://zhuanlan.zhihu.com/p/479530563；https://zhuanlan.zhihu.com/p/425233743；https://zhuanlan.zhihu.com/p/366494818
+
+- 光栅化
+  - 如果是按线框来光栅化的话，是根据斜率，当斜率较大时，每步进一个单位的x/y，对应的y/x会步进若干个单位，因为锯齿明显。
+  - https://zhiruili.github.io/posts/rasterization/
