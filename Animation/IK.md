@@ -26,6 +26,17 @@
   - 更好的思路？：https://zhuanlan.zhihu.com/p/608534364
     - 直接计算各个joint 的 world pos/rot， world rot = world rot * rotation； world pos = offset * rotation + 转动关节的pos（这里的offset 是指末端到转动点的位置的offset![20240725175825](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240725175825.png)）
 
+- FABRIK(Forward and Backward reaching inverse Kinematics): 通过通过计算骨骼节点的空间坐标关系来实现IK。不需要计算旋转，只需要计算线性位置就最终可以求得近似解。（不使用角度旋转，而是将关节沿直线的新位置更新到下一个关节）
+  - 迭代步骤： Fabrik 算法一次迭代执行两个方向的遍历，首先从后往前计算到达目标点情况下所有骨骼的空间位置变化（不包括根节点），然后从前往后计算从根节点出发到达目标节点的骨骼节点位置。 
+    - 逆向： 最后一个骨骼节点置于目标位置，然后从后向前遍历骨骼节点，前一个节点的位置由后一个节点指向前一个节点的方向向量的单位向量乘以骨骼长度加上后一个节点当前的位置得到。![20250208104405](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250208104405.png)
+    - 正向： 从根节点开始从前向后遍历骨骼节点，后一个节点的位置由前一个节点指向后一个节点的方向向量的单位向量乘以骨骼长度加上前一个节点当前的位置得到， ![20250208111127](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250208111127.png)
+  - 
+    - https://zhuanlan.zhihu.com/p/471910711
+    - https://busyogg.github.io/article/5795c3870390/
+    - https://blog.csdn.net/zhaishengfu/article/details/88195246
+  - 问题： 如何在迭代时，防止出现关节反向折叠(pole target constraint)的问题？？![20250208153719](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250208153719.png)
+    - 可能方法：忽略无法达到位置的关节，将该关节与其父关节合并处理？
+
 - Gradient Descent：计算函数的梯度，每次根据设置的步长逐步逼近target。https://medium.com/unity3danimation/overview-of-jacobian-ik-a33939639ab2; https://nrsyed.com/2017/12/10/inverse-kinematics-using-the-jacobian-inverse-part-2/ ; https://www.zhihu.com/question/305638940/answer/1639782992
   - Jacobian matrix: ![20240725183438](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240725183438.png) 上图中 \( $p_x, p_y, p_z$ \) 所表示的是 *End_effector*的坐标。而matrix本身则记录 effector 其在各个方向（行） 与 各个joint（纵） 上的变化率。
     - 而在实际计算中，各个偏导则用叉乘来代替：![20240725190637](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240725190637.png). 其中 $a_j$ 表示在世界空间下joint的旋转轴![20240726103958](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240726103958.png)，$r_e \, r_j$ 分别表示end_effector 和 joint的坐标。（世界空间下）。（但用轴角来表示Jacobian会很复杂，一般使用欧拉角将旋转分解为单个自由度的旋转。）
