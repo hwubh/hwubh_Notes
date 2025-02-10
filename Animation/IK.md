@@ -34,7 +34,7 @@
     - https://zhuanlan.zhihu.com/p/471910711
     - https://busyogg.github.io/article/5795c3870390/
     - https://blog.csdn.net/zhaishengfu/article/details/88195246
-  - 问题： 如何在迭代时，防止出现关节反向折叠(pole target constraint)的问题？？![20250208153719](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250208153719.png)
+  - 问题： 如何在迭代时，防止出现关节反向折叠(pole target constraint)的问题？？![20250208153719](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250208153719.png)![20250210105026](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250210105026.png)
     - 可能方法：忽略无法达到位置的关节，将该关节与其父关节合并处理？
 
 - Gradient Descent：计算函数的梯度，每次根据设置的步长逐步逼近target。https://medium.com/unity3danimation/overview-of-jacobian-ik-a33939639ab2; https://nrsyed.com/2017/12/10/inverse-kinematics-using-the-jacobian-inverse-part-2/ ; https://www.zhihu.com/question/305638940/answer/1639782992
