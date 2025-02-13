@@ -1,0 +1,85 @@
+- Rendering
+  - UniversalRenderPipeline::ProcessRenderRequests -> Render -> RenderCameraStack -> RenderSingleCamera -> RecordAndExecuteRenderGraph -> 
+  - Record： 
+    - ScriptableRenderer:: RecordRenderGraph 
+    - UniversalRenderer::OnRecordRenderGraph -> OnMainRendering
+      - ClearTargetsPass -> StencilCrossFadeRenderPass -> customPasses(BeforeRenderingPrePasses) -> Depth(Normal)PrepassRender -> customPasses(AfterRenderingPrePasses) -> if deferred
+  - Execute：  
+    - RenderGraph::EndRecordingAndExecute -> Execute -> ExecuteRenderGraph -> ExecuteCompiledPass ->
+    - RenderGraphPass::Execute
+
+- UniversalRenderer在构建时会确定使用的render path
+  - 当render path 是 deferred+ 时
+    - GBufferPass + CopyDepthPass + DeferredPass + DrawObjectsPass
+  - if deferred -> 
+    customPasses(BeforeRenderingGbuffer) -> GBufferPass -> customPasses(BeforeRenderingDeferredLights) -> DeferredPass -> customPasses(BeforeRenderingOpaques) -> DrawObjectsPass(ForwardOnly) -> ...
+
+
+- URP17 + DeferredPlus + NORenderGraph : 
+  - renderer = cameraData.renderer -> frameData
+  - TryGetCullingParameters
+  - renderer.OnPreCullRenderPasses : per pass
+  - renderer.SetupCullingParameters : per pass
+  - SetupPerCameraShaderConstants
+  - ProbeReferenceVolume.instance.UpdateCellStreaming + ProbeReferenceVolume.instance.BindAPVRuntimeResources
+  - additionalCameraData.motionVectorsPersistentData.Update + UpdateTemporalAATargets
+  - context.Cull
+  - CreateUniversalResourceData : consisted of all rthandles
+  - CreateLightData: reflectionProbeAtlas = settings.reflectionProbeBlending && isDeferredPlus(...)
+  - CreateShadowData
+  - CreatePostProcessingData
+  - CreateRenderingData
+  - CreateCullContextData
+  - CreateShadowAtlasAndCullShadowCasters
+    - InitializeMainLightShadowResolution
+    - BuildAdditionalLightsShadowAtlasLayout
+    - CullShadowCasters
+  - renderer.AddRenderPasses
+  - renderer.Setup : UniversalRenderer.Setup
+    - IsDepthPrimingEnabled = false
+    - if IsOffscreenDepthTexture == true: enqueue ``m_RenderOpaqueForwardPass`` ``m_RenderTransparentForwardPass`` and return 
+    - createColorTexture = true : Assign the camera color target early
+    - UpdateCameraHistory
+    - GetRenderPassInputs
+    - RequireRenderingLayers (if opengles, = false, because of MRT )
+    - m_DeferredLights.ResolveMixedLightingMode -> CreateGbufferResources: create gbuffer RTHandle
+    - if UseFramebufferFetch == true : ??
+    - if ssao == true-> depth-normal texture
+    - if need depthcopy
+    - createColorTexture needed
+    - CreateCameraRenderTarget
+    - EnqueuePass(m_MainLightShadowCasterPass);
+    - EnqueuePass(m_AdditionalLightsShadowCasterPass);
+    - RenderingUtils.ReAllocateHandleIfNeeded: Allocate m_DepthTexture if used
+    - EnqueuePass(m_DepthNormalPrepass/m_DepthPrepass);
+    - if useDepthPriming == true -> EnqueuePass(m_PrimedDepthCopyPass);
+    - if generateColorGradingLUT == true -> EnqueuePass(colorGradingLutPass);
+    - EnqueueDeferred
+      - m_GBufferPass.Configure
+      - m_DeferredPass.Configure
+      - EnqueuePass(m_GBufferPass);
+      - EnqueuePass(m_GBufferCopyDepthPass);
+      - EnqueuePass(m_DeferredPass);
+      - EnqueuePass(m_RenderOpaqueForwardOnlyPass);
+    - EnqueuePass(m_DrawSkyboxPass);
+    - if copyColorPass == true -> EnqueuePass(m_CopyColorPass);
+    - if requiresMotionVectors == true -> EnqueuePass(m_MotionVectorPass);
+    - if needTransparencyPass -> EnqueuePass(m_TransparentSettingsPass);
+    - EnqueuePass(m_RenderTransparentForwardPass);
+    - EnqueuePass(m_OnRenderObjectCallbackPass);
+    - SetupRawColorDepthHistory
+      - EnqueuePass(m_HistoryRawDepthCopyPass);
+    - EnqueuePass(m_DrawOffscreenUIPass);
+    - if last camera in stack: 
+      - EnqueuePass(postProcessPass);
+      - EnqueuePass(finalPostProcessPass);
+      - if cameraData.captureActions -> EnqueuePass(m_CapturePass);
+      - EnqueuePass(m_DrawOverlayUIPass);
+    - else -> EnqueuePass(postProcessPass)
+  - renderer.Execute
+    - InternalStartRendering -> OnCameraSetup
+    - SortStable: sort passes
+    - pass.Configure
+    - SetupNativeRenderPassFrameData
+      - IF RPEnabled == True -> try to merge passes
+    - SetupLights (D+)
