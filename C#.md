@@ -62,6 +62,8 @@
   - 编译时：编译器读到那些标记（eg：MethodImpl）的时候会有一些事先决定好的行为
   - 运行时：用于反射：注解就是在不破坏原有代码的情况下，在代码的元数据上附加一些信息
   - 声明、构建：![20240515172757](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240515172757.png)
+  - 例子：
+    - Conditional： 有该标记的函数，编译时会保留该函数，但会移除调用该函数的调用。
 - Reflection：反射是程序正在运行时，可以查看自身或者其他程序集元数据的行为。https://www.runoob.com/csharp/csharp-reflection.html
   - 可以获取message、member、.ctor、field、method； 修改字段，使用方法；将 Type 对象快速实例化成一个对象（Activator）
   - 手游中少用：性能、未引用时被裁剪
