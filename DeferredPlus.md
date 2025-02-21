@@ -150,7 +150,7 @@ LOD_FADE_CROSSFADE
   - constructor
     - 初始化mainlight，additionlight的参数： posiiton，color，occlusionProbesChannel，layerMask，Attenuation，spotDir
     - if (m_UseForwardPlus)： CreateForwardPlusBuffers
-      - 申请两个的buffer及其对应的array，z方向上分为4096个？ xy方向上为4096 或 10384
+      - 申请两个的buffer及其对应的array，z方向上分为4096个 uint？ xy方向上为4096 或 10384 uint
       - 创建 ReflectionProbeManager？
   - SetupLights
     - if (m_UseForwardPlus)
@@ -159,8 +159,32 @@ LOD_FADE_CROSSFADE
   - PreSetup
     - if (m_UseForwardPlus)：
       - 跳过 directional light
-      - m_WordsPerTile： 计算每个tile上需要多少words， items的数量为可见光源的数量 + 反射探针的数量 =》 当存在少于31个additional光源时，只需要存1份。
-
+      - itemsPerTile: additional lights + reflection probes
+      - m_WordsPerTile： 计算每个tile上需要多少words， items的数量为可见光源的数量 + 反射探针的数量 =》 当存在少于31个additional光源时，只需要存1份。 => 每个word(uint)有32位，最多可以表示32个光源/反射探针
+      - m_TileResolution： 场景中tile的数量， m_TileResolution.x * m_TileResolution.y * m_WordsPerTile * viewCount > UniversalRenderPipeline.maxTileWords
+        - m_TileResolution.x * m_TileResolution.y: tile的数量
+        - m_WordsPerTile： 每个tile占据的大小
+        - viewCount： 场景中渲染的次数？比如vr的话，需要分别渲染左右眼，共两次
+      - m_BinCount = (int)(camera.farClipPlane * m_ZBinScale + m_ZBinOffset); binIndex = z * zBinScale + zBinOffset ： 每个zbin至少占据3个uint ： header：两uint + data： 一uint
+        - m_ZBinScale = 1 / scale; z * m_ZBinScale -> 在第几份，相当于 z / scale
+        - m_ZBinOffset = -camera.nearClipPlane * m_ZBinScale; -> offset
+        - m_BinCount = (int)(camera.farClipPlane * m_ZBinScale + m_ZBinOffset) = (camera.farClipPlane - camera.nearClipPlane) * m_ZBinScale
+      - LightMinMaxZJob
+        - minMaxZs （local）: 记录各个光源影响的深度范围
+      - reflectionProbeMinMaxZJob：
+        - minMaxZs（local）： 记录各个反射探针影响的深度范围
+      - minMaxZs （global）： 记录各个光源+反射探针影响的深度范围
+      - ZBinningJob ： 计算各个光源+反射探针对于zbin的影响（是否在范围内）
+        - zBinningBatchCount： batch的数量。每个batch包含128个zbin
+        - zbin: 每个zbin占据 （2 + m_WordsPerTile）个uint； 2 代表光源和反射探针各自占据的一个uint，每个uint的高16位代表当前 ZBin 所占有的光源的 maxIndex， 低16位为minIndex。 第三个uint则记录具体有哪些光源/反射探针影响该zbin
+          - 这里以一个占据了3uint的zbin为例，三个uint分别为
+             458752： 0111 0000000000000000 ： 光源的最大序号为7， 最小为0
+             589832： 1001 0000000000001000 ： 反射探针的最大序号为9， 最小为8
+             899：               1110000011 ： 涉及的光源序号为0， 1， 7， 8， 9
+             记录最大，最小序号的意义是？？
+      - TilingJob：
+      - TileRangeExpansionJob 
+        - m_TileMasks: 包含一个uint，每个位上代表收影响的光源/反射探针的序号
 
 
 - framebuffer fetch: use the ``SetInputAttachment`` API to set the output of a render pass as the input of the next render pass. keep the framebuffer stays in the on-chip memory, avoid the cost of the bandwidth caused by the acessing it from the video memory.
@@ -188,3 +212,7 @@ LOD_FADE_CROSSFADE
 
 - work
   - DBufferCopyDepthPass 是 workaround的，之后需检查，修改.
+
+
+- Test000_ForwardPlus: 
+  - 只能有32个光？maximumVisibleLights = 32?
