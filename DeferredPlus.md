@@ -214,5 +214,11 @@ LOD_FADE_CROSSFADE
   - DBufferCopyDepthPass 是 workaround的，之后需检查，修改.
 
 
-- Test000_ForwardPlus: 
-  - 只能有32个光？maximumVisibleLights = 32?
+~~ Test000_ForwardPlus:只能有32个光？ maximumVisibleLights = 32? ~~
+
+- deferred -> unlimited additional lights
+  deferred+ -> max 256 lights
+  Forwardonlypass in deferred -> ?
+
+- 000 ： tuanjie上颜色不太一样？
+- 050： 哪些是deferred，哪些是forwardonly？
