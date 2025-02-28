@@ -35,10 +35,18 @@
     - https://busyogg.github.io/article/5795c3870390/
     - https://blog.csdn.net/zhaishengfu/article/details/88195246
   - 问题： 如何在迭代时，防止出现关节反向折叠(pole target constraint)的问题？？![20250208153719](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250208153719.png)![20250210105026](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250210105026.png)
-    - 可能方法：忽略无法达到位置的关节，将该关节与其父关节合并处理？
+    - 可能方法：忽略无法达到位置的关节，将该关节与其父关节合并处理？: 通过忽略骨骼，优先计算移动父关节是否可以使target point 落入可解的范围中。
 
 - Gradient Descent：计算函数的梯度，每次根据设置的步长逐步逼近target。https://medium.com/unity3danimation/overview-of-jacobian-ik-a33939639ab2; https://nrsyed.com/2017/12/10/inverse-kinematics-using-the-jacobian-inverse-part-2/ ; https://www.zhihu.com/question/305638940/answer/1639782992
-  - Jacobian matrix: ![20240725183438](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240725183438.png) 上图中 \( $p_x, p_y, p_z$ \) 所表示的是 *End_effector*的坐标。而matrix本身则记录 effector 其在各个方向（行） 与 各个joint（纵） 上的变化率。
+  - Jacobian matrix:  
+    ![20240725183438](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240725183438.png) \
+    上图中 \( $p_x, p_y, p_z$ \) 所表示的是 *End_effector*的坐标。而matrix本身则记录 effector 其在各个方向（行） 与 各个joint（纵） 上的变化率。 \
+    若将其按照各个关节拆分，每次迭代的距离$\Delta r$相当于各个关节在各自的 $\Delta \theta$的转动下，对于effector 在XYZ方向的产生的位移的总和。 \
+    ![20250228165607](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250228165607.png)
+    ![20250228165556](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250228165556.png)
+    这种位移也可以从关节，effector， $\Delta \theta$三者构成的切线上得到。\ ![20250228170709](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250228170709.png)
+
+
     - 而在实际计算中，各个偏导则用叉乘来代替：![20240725190637](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240725190637.png). 其中 $a_j$ 表示在世界空间下joint的旋转轴![20240726103958](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240726103958.png)，$r_e \, r_j$ 分别表示end_effector 和 joint的坐标。（世界空间下）。（但用轴角来表示Jacobian会很复杂，一般使用欧拉角将旋转分解为单个自由度的旋转。）
     - ![20240726121429](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20240726121429.png) 不是很理解？
   <!-- - Jacobian methods steps：Find the joint configurations: *T*
