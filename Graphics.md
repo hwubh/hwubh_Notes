@@ -90,3 +90,18 @@
 - 光栅化
   - 如果是按线框来光栅化的话，是根据斜率，当斜率较大时，每步进一个单位的x/y，对应的y/x会步进若干个单位，因为锯齿明显。
   - https://zhiruili.github.io/posts/rasterization/
+
+- FrameBufferFetch 和 Renderpass/subrenderpass：
+  - FrameBufferFetch 允许在一个pass在fragment shader阶段对当前缓冲区的像素进行访问- 》 读取当前像素位置的 原始值，根据读取的原始值计算新值，再写回同一位置。 （通过硬件）
+    - 在Tile-Based GPU： Framebuffer 数据保留在Tile Memory中，不需要经过显存，减少带宽消耗。
+    - 数据同步问题：
+      - 单像素顺序性：同一像素位置的片段着色器调用会按提交顺序执行（如深度测试通过顺序）。
+      - 多像素并行性：不同像素位置的读写可以并行，硬件自动管理依赖。
+      - 不能跨像素读取数据 -> 未定义操作
+    - 本质： 同时读写RT? 节省传统 Load/Store RT的消耗。
+  - Renderpass/subrenderpass: 允许在一个Renderpass的多个subpass （相当于上文的pass）之间复用输入输出。 - 》 即当前subpass的输出之间作为下一个subpass的输入使用，避免通过显存造成的带宽消耗。
+    - 在Tile-Based GPU： Framebuffer 数据保留在Tile Memory中，不需要经过显存，减少带宽消耗。
+    - 本质： 类似memoryless？ 不需要跨帧使用的，即写即用即抛的RT不要写回显存中。
+    - Tile-based：Vertex阶段逐subpass的，所有的subpass的vertex阶段后（结果写入一块内存中）才有Tile的划分。  ![20250313172611](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250313172611.png)
+                  Fragment阶段是先逐Tile，即该tile所有subpass的fragment都依次执行完毕后，才执行下一个Tile。
+  - 注意事项： Tile Memory 容量有限！ 

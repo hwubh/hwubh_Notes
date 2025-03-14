@@ -27,3 +27,4 @@
     - Glossiness: 灰度图，数值越大越光滑
     - 优劣：可以灵活调整金属，非金属的$F_0$，也容易制作出违反物理定律的贴图；使用了两张RGB图。
 - 14: Shadow pancaking: unity 会调整（前提）光源相机的近平面来优化阴影质量，但这也可能造成错误的阴影显示。
+- 15： Native Renderpass -> 底层原理即Vulkan那一套RenderPass/subpass

@@ -207,7 +207,6 @@ LOD_FADE_CROSSFADE
   - 具体渲染部分：
     - 
 
-
 - commit: ![20250217102434](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250217102434.png)
 
 - work
@@ -222,3 +221,15 @@ LOD_FADE_CROSSFADE
 
 - 000 ： tuanjie上颜色不太一样？
 - 050： 哪些是deferred，哪些是forwardonly？
+
+-------------
+- universalRenderer.useRenderPassEnabled: 作用？ -》 deferred时默认开启native render pass？ -》 减少对Gbuffer的访问？ -> 保留
+- RenderingLayerUtils.RequireRenderingLayers： 判断lightmode用？ -》保留
+- GBufferFragOutput frag(PackedVaryings packedInput)： 改了个名字？ -》 保留
+- PopulateCompatibleDepthFormats： 判断 depth 格式的兼容性， 并显示gui上？ -》 没有相关内容， 不保留
+- private static bool HasCorrectLightingModes(UniversalRenderPipelineAsset asset): used for gpu driven drawer, 不保留
+- public bool IsGPUResidentDrawerSupportedBySRP(out string message, out LogType severty): 同上
+- internal bool IsGBufferValid { get; set; }: 用于Render Graph， 不保留
+- if (!UseFramebufferFetch): https://github.com/Unity-Technologies/Graphics/commit/9fe6f5fd1b81800715d60b6b4ba7dcbbdcbfeba9#diff-546c949fd823f6a0267b05267bdedb26259c9c63ae52fce0b60f797b8d9d1a6b ; m_DeferredLights.GbufferAttachments 已经在Gbufferpass中设置成了全局变量，这里不在deferredLights（即deferredpass）的材质上设置应该也是可以的？ -》 不用glabol texture 会省带宽消耗吗？？ -》 先不保留
+- private void InitRendererLists(ref PassData passData, ScriptableRenderContext context, RenderGraph renderGraph, UniversalRenderingData renderingData, UniversalCameraData cameraData, UniversalLightData lightData, bool useRenderGraph, uint batchLayerMask = uint.MaxValue): render graph 相关，不保留
+- half4 SampleAdditionalLightCookieDeferred(int perObjectLightIndex, float3 samplePositionWS): 采样additional light cookie的整理，之前只支持point 和 spot，这里添加了对additional directional light cookie的支持。： 非deferred的内容，不保留
