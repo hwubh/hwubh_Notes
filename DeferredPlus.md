@@ -233,3 +233,27 @@ LOD_FADE_CROSSFADE
 - if (!UseFramebufferFetch): https://github.com/Unity-Technologies/Graphics/commit/9fe6f5fd1b81800715d60b6b4ba7dcbbdcbfeba9#diff-546c949fd823f6a0267b05267bdedb26259c9c63ae52fce0b60f797b8d9d1a6b ; m_DeferredLights.GbufferAttachments 已经在Gbufferpass中设置成了全局变量，这里不在deferredLights（即deferredpass）的材质上设置应该也是可以的？ -》 不用glabol texture 会省带宽消耗吗？？ -》 先不保留
 - private void InitRendererLists(ref PassData passData, ScriptableRenderContext context, RenderGraph renderGraph, UniversalRenderingData renderingData, UniversalCameraData cameraData, UniversalLightData lightData, bool useRenderGraph, uint batchLayerMask = uint.MaxValue): render graph 相关，不保留
 - half4 SampleAdditionalLightCookieDeferred(int perObjectLightIndex, float3 samplePositionWS): 采样additional light cookie的整理，之前只支持point 和 spot，这里添加了对additional directional light cookie的支持。： 非deferred的内容，不保留
+
+
+----------------
+
+Deferred+:
+- UniversalRenderer: 
+  - UniversalRenderer 初始化时会初始ForwardLight
+  - ForwardLight 初始化时会全局设置keyword **_CLUSTER_LIGHT_LOOP**
+- Render GBuffer: 
+  - Lit.Shader: 的 *GBuffer* pass有 keyword **_CLUSTER_LIGHT_LOOP**。
+    - 在计算GetMainLight时，有以下代码
+    ``` c#
+    #if USE_CLUSTER_LIGHT_LOOP
+      #if defined(LIGHTMAP_ON) && defined(LIGHTMAP_SHADOW_MIXING)
+          light.distanceAttenuation = _MainLightColor.a;
+      #else
+          light.distanceAttenuation = 1.0;
+      #endif
+    #else
+        light.distanceAttenuation = unity_LightData.z; // unity_LightData.z is 1 when not culled by the culling mask, otherwise 0.
+    #endif
+    ``` 
+  -> 默认主光源的距离衰减为1（不衰减？？），因为在计算cluster时已经排除了不可见的光源。 -》 计算cluster时如果mianlight不可见是如何配置的？？？
+  -> 通过权重值_MainLightColor.a， 混合烘焙与实时阴影； 非cluster的需要后续手动进行混合？？
