@@ -257,3 +257,20 @@ Deferred+:
     ``` 
   -> 默认主光源的距离衰减为1（不衰减？？），因为在计算cluster时已经排除了不可见的光源。 -》 计算cluster时如果mianlight不可见是如何配置的？？？
   -> 通过权重值_MainLightColor.a， 混合烘焙与实时阴影； 非cluster的需要后续手动进行混合？？
+  - 在计算 GlobalIllumination -> GlossyEnvironmentReflection 时， 如果开启了 _REFLECTION_PROBE_BLENDING 或 cluster lights 会通过反射探针来计算 间接镜面反射IBL. 
+    >关于 Reflection probe blending: 只有像素存在于Reflection probe volume中时才计算该probe。
+    >通过 Blend Distance 与 像素到probe volume表面的距离来计算贡献度。 当像素到面距离从0~Blend Distance时， 贡献度从 0~100%之间变化。
+    >反射探针的贡献度由像素到包围盒 所有面的距离共同决定： 贡献度 = min( 像素到各面的距离 / Blend Distance, 1.0 )。当存在Blend Distance 超过面间距一半时，该probe不存在一个位置可以使贡献度到达100%。
+  开启cluster时会遍历cluster中记录的各个reflection probe，直到权重已满0.99
+  否则，只采样固定的两个探针unity_SpecCube0，unity_SpecCube1 ？？ 
+
+    ![20250320144253](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250320144253.png)
+- Render Deferred Lighting: 使用不同的shader
+  - PrecomputeLights
+  - ClusterDeferred: 
+    - 顶点着色阶段：使用全屏三角形处理。
+      > 对比StencilDeferred： pass0:Stencil Volume？？
+      > pass1: Punctual Light??
+      > StencilDeferred的顶点着色阶段会根据光源类型调整几何体的形状，保证使其仅覆盖光源实际影响的地方。（如 directional light影响全部像素的话，则使用全屏三角形。点光源则为球体的投影，spot则为锥体的投影。）
+      不同的光源在不同的渲染队列上
+      ![20250320163954](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250320163954.png)
