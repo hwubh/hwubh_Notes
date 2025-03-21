@@ -267,10 +267,52 @@ Deferred+:
     ![20250320144253](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250320144253.png)
 - Render Deferred Lighting: 使用不同的shader
   - PrecomputeLights
-  - ClusterDeferred: 
-    - 顶点着色阶段：使用全屏三角形处理。
+  - ClusterDeferred: ~~没有开启keyword**_CLUSTER_LIGHT_LOOP**？？ 没有做什么特殊处理？先计算mainlight，再算additional的非directional light， 最后算additional directional light。 （没开cluster light，哪里来的URP_FP_DIRECTIONAL_LIGHTS_COUNT？？？）~~ 直接在ClusterDeferred中定义了_CLUSTER_LIGHT_LOOP： ![20250321160707](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250321160707.png)
+    - 顶点着色阶段：使用全屏三角形处理。 因为后续可以直接使用光簇中记录的受影响的光源进行着色，不需要担心该像素是否做了多余的着色。
       > 对比StencilDeferred： pass0:Stencil Volume？？
       > pass1: Punctual Light??
       > StencilDeferred的顶点着色阶段会根据光源类型调整几何体的形状，保证使其仅覆盖光源实际影响的地方。（如 directional light影响全部像素的话，则使用全屏三角形。点光源则为球体的投影，spot则为锥体的投影。）
       不同的光源在不同的渲染队列上
       ![20250320163954](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250320163954.png)
+    - 片元着色阶段： _SIMPLELIT -> Blinn-phong; _LIT -> PBR
+      - 先计算MAIN LIGHT： 
+      ``` 
+      color += DeferredLightContribution(mainLight, inputData, gBufferData);
+      ```
+
+      - 再计算非Directional的 additional light： 不过 GetAdditionalLightsCount() = 0 -> 无所谓 -> 开启 USE_CLUSTER_LIGHT_LOOP 时，下列代码 
+      ```
+      uint pixelLightCount = GetAdditionalLightsCount();
+      LIGHT_LOOP_BEGIN(pixelLightCount)
+        Light light = GetAdditionalLight(lightIndex, inputData, gBufferData.shadowMask, aoFactor);
+
+        UNITY_BRANCH if (materialReceiveShadowsOff)
+        {
+            light.shadowAttenuation = 1.0;
+        }
+
+        color += DeferredLightContribution(light, inputData, gBufferData);
+      LIGHT_LOOP_END
+      ``` 
+      等价于
+      ```
+      {
+        uint lightIndex;
+        ClusterIterator _urp_internal_clusterIterator = ClusterInit(inputData.normalizedScreenSpaceUV, inputData.positionWS, 0);
+        [loop] while (ClusterNext(_urp_internal_clusterIterator, lightIndex)) 
+        {
+          lightIndex += URP_FP_DIRECTIONAL_LIGHTS_COUNT; //_AdditionalLightsXXXX数组先放的Directional Light的数据 -》 应该是lightData.visibleLights 里就是这么排的
+          if (_AdditionalLightsColor[lightIndex].a > 0.0h) continue;
+          Light light = GetAdditionalLight(lightIndex, inputData, gBufferData.shadowMask, aoFactor);
+
+          UNITY_BRANCH if (materialReceiveShadowsOff)
+          {
+              light.shadowAttenuation = 1.0;
+          }
+
+          color += DeferredLightContribution(light, inputData, gBufferData);
+        } 
+      }
+      ```
+  - 
+- Render Opaques Forward Only: 目前Target为ScalableLit 和 Fabric 的shadergraph 不支持Gbuffer的结构，会使用ForwardOnly. 此外Unlit的shader会走Gbuffer的渲染，但不会参与deferredLighting。其也在ForwardOnly阶段渲染。![20250321175443](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250321175443.png) -》 在延迟渲染中，GBuffer 存储了场景的几何信息（如法线、深度、材质属性等）。如果某些物体（如 Unlit 物体）不写入 GBuffer，会导致 GBuffer 中出现“空洞”（即缺失数据区域）。？？
