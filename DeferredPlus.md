@@ -150,31 +150,65 @@ LOD_FADE_CROSSFADE
   - constructor
     - 初始化mainlight，additionlight的参数： posiiton，color，occlusionProbesChannel，layerMask，Attenuation，spotDir
     - if (m_UseForwardPlus)： CreateForwardPlusBuffers
-      - 申请两个的buffer及其对应的array，z方向上分为4096个 uint？ xy方向上为4096 或 10384 uint
-      - 创建 ReflectionProbeManager？
-  - SetupLights
-    - if (m_UseForwardPlus)
-      - m_ReflectionProbeManager.UpdateGpuData（传入 cullResults）： visibleReflectionProbes?
-      - 设置对应参数在shader侧的命名： urp_ZBinBuffer  urp_TileBuffer _FPParams0 _FPParams1 _FPParams2![20250219174052](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250219174052.png)
+      - 申请两个的buffer及其对应的array，
+        z方向上**m_ZBins/m_ZBinsBuffer**为4096个 uint/float。 
+        xy方向上**m_TileMasks/m_TileMasksBuffer**为4096 或 10384个（additional light数量大于32个时） uint/float
+      - 创建 ReflectionProbeManager -> 创建两张 1*1的 RT
   - PreSetup
-    - if (m_UseForwardPlus)：
-      - 跳过 directional light
-      - itemsPerTile: additional lights + reflection probes
-      - m_WordsPerTile： 计算每个tile上需要多少words， items的数量为可见光源的数量 + 反射探针的数量 =》 当存在少于31个additional光源时，只需要存1份。 => 每个word(uint)有32位，最多可以表示32个光源/反射探针
-      - m_TileResolution： 场景中tile的数量， m_TileResolution.x * m_TileResolution.y * m_WordsPerTile * viewCount > UniversalRenderPipeline.maxTileWords
+    - if (m_UseForwardPlus)： ScheduleClusteringJobs![20250324112046](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250324112046.png)
+      - ScheduleClusteringJobs 返回的参数
+        - lights
+        - probes ： 根据Importance从大到小排序的reflection probe 数组
+        - zBins
+        - tileMasks
+        - worldToViews
+        - viewToClips
+        - m_LightCount ： 非directional 的 additional light （**localLights**）的数量
+        - m_DirectionalLightCount： additional light中 directional light的数量
+        - out m_BinCount, ： 沿Z方向划分的区块(Zbin)的数量
+        - out m_ZBinScale, : ZBinScale, 单位距离上Zbin的数量，用于当前Zbin序号的计算。
+        - out m_ZBinOffset, ： ZBinOffset， 0~近平面距离上Zbin数量offset，用于当前Zbin序号的计算。
+        - out m_TileResolution, : XY划分的区块(Tile)的数量
+        - out m_ActualTileWidth, ： 每个Tile的尺寸（像素单位）
+        - out m_WordsPerTile ： 每个tile占据的Uint 数量。
+      - 跳过 directional light -》影响全局
+      - itemsPerTile: localLights + reflection probes
+      - m_WordsPerTile： 计算每个tile上需要多少words， items的数量为 可见光源的数量 + 反射探针的数量 =》 当存在少于31个additional光源时，只需要存1份。 => 每个word(uint)有32位，最多可以表示32个光源/反射探针![20250324115636](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250324115636.png)
+      - m_TileResolution： 场景中tile的数量， m_TileResolution.x * m_TileResolution.y * m_WordsPerTile * viewCount > UniversalRenderPipeline.maxTileWords -> 从8个像素的Tile开始划分。如果tile数量超出了m_TileMasksBuffer的尺寸，则扩大一倍，使用16个像素的Tile。 以此类推，tile的数量不大于m_TileMasksBuffer的尺寸。
         - m_TileResolution.x * m_TileResolution.y: tile的数量
         - m_WordsPerTile： 每个tile占据的大小
         - viewCount： 场景中渲染的次数？比如vr的话，需要分别渲染左右眼，共两次
-      - m_BinCount = (int)(camera.farClipPlane * m_ZBinScale + m_ZBinOffset); binIndex = z * zBinScale + zBinOffset ： 每个zbin至少占据3个uint ： header：两uint + data： 一uint
+        - ![20250324115636](https://raw.githubusercontent.com/hwubh/Temp-Pics/d563be2c9a2dceceb2f1fb6600e38fd4d8c861f3/20250324115923.png)
+      - m_BinCount： m_BinCount = (int)(camera.farClipPlane * m_ZBinScale + m_ZBinOffset); binIndex = z * zBinScale + zBinOffset ： 每个zbin至少占据3个uint ： header：两uint + data： 一uint
         - m_ZBinScale = 1 / scale; z * m_ZBinScale -> 在第几份，相当于 z / scale
         - m_ZBinOffset = -camera.nearClipPlane * m_ZBinScale; -> offset
         - m_BinCount = (int)(camera.farClipPlane * m_ZBinScale + m_ZBinOffset) = (camera.farClipPlane - camera.nearClipPlane) * m_ZBinScale
+        - ![20250324144021](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250324144021.png)
+          > 透视时使用对数的原因： 沿Z划分时，我们希望做到划分的各个每一块在屏幕占据的像素尽可能接近。 因此需要划分时，越靠近远平面时，每一块占据的深度越多。（因为越远的三角形投影到屏幕上时越小）。
+          （图a）如果NDC空间中沿Z方向划分，虽然符合我们的希望，但会使得精度分布过于偏向于近平面。
+          （图b）如果View空间中沿Z方向划分，会使每块分配的深度相同，不符合我们的希望。近远平面的块过多。
+          （图c）因此URP中选择在View空间中使用对数进行划分，在图二的基础上，给靠近近平面的分配更多的快。
+          > [参考链接](https://www.aortiz.me/2018/12/21/CG.html#tiled-shading--forward); [其他延申内容1](https://developer.nvidia.com/content/depth-precision-visualized)；[原论文](https://www.cse.chalmers.se/~uffe/clustered_shading_preprint.pdf)
+          > ![20250324154311](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250324154311.png)
+          > 公式，图示：![20250324154543](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250324154543.png) 
+      - probes： 将probe根据importance 从大到小进行排序。
+        > Unity 文档说着色计算是最多只用两个reflection probe，但 cluster时好像不是？？？ 
       - LightMinMaxZJob
-        - minMaxZs （local）: 记录各个光源影响的深度范围
+        - minMaxZs （local）: 计算各个local光源（Point 和 Spot）影响的深度范围
+          - Point： 计算该光源中心点在View空间下的深度值，加上/减去光的范围（range）
+          - Spot： 计算圆锥包围盒的范围，再得到其深度值![20250324170557](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250324170557.png) ![20250324171628](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250324171628.png)
       - reflectionProbeMinMaxZJob：
         - minMaxZs（local）： 记录各个反射探针影响的深度范围
-      - minMaxZs （global）： 记录各个光源+反射探针影响的深度范围
-      - ZBinningJob ： 计算各个光源+反射探针对于zbin的影响（是否在范围内）
+          - ![20250324172953](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250324172953.png)
+          - 计算包围盒各个顶点的Z值并比较
+          - 一种遍历各个序号的方式； i = 0时，为 x=-1, y=-1, z=-1；i = 1时，x=1, y=-1, z=-1 ... i = 7， x=1, y=1, z=1
+          ``` c#
+            var x = ((i << 1) & 2) - 1; // i 的二进制位操作生成 [-1, 1]
+            var y = (i & 2) - 1;
+            var z = ((i >> 1) & 2) - 1;
+          ```
+      - minMaxZs （global）： 记录各个光源+反射探针影响的深度范围 
+      - ZBinningJob （一共有*zBinningBatchCount*个job）： 计算各个光源+反射探针对于zbin的影响（是否在范围内）
         - zBinningBatchCount： batch的数量。每个batch包含128个zbin
         - zbin: 每个zbin占据 （2 + m_WordsPerTile）个uint； 2 代表光源和反射探针各自占据的一个uint，每个uint的高16位代表当前 ZBin 所占有的光源的 maxIndex， 低16位为minIndex。 第三个uint则记录具体有哪些光源/反射探针影响该zbin
           - 这里以一个占据了3uint的zbin为例，三个uint分别为
@@ -182,9 +216,18 @@ LOD_FADE_CROSSFADE
              589832： 1001 0000000000001000 ： 反射探针的最大序号为9， 最小为8
              899：               1110000011 ： 涉及的光源序号为0， 1， 7， 8， 9
              记录最大，最小序号的意义是？？
+      - GetViewParams： 传入投影矩阵 -》 主要用于VR的斜视投影
+        - 正交时记录非对称正交投影的偏移； 投影时记录投影屏幕的偏移参数
+        - viewPlaneBottom0 ： 视口偏移的下界
+        - viewPlaneTop0 ： 视口偏移的上界
+        - viewToViewportScaleBias0 ： 视口的缩放偏置参数；前两项记录scale，后两项记录offset
       - TilingJob：
       - TileRangeExpansionJob 
         - m_TileMasks: 包含一个uint，每个位上代表收影响的光源/反射探针的序号
+  - SetupLights
+    - if (m_UseForwardPlus)
+      - m_ReflectionProbeManager.UpdateGpuData（传入 cullResults）： visibleReflectionProbes?
+      - 设置对应参数在shader侧的命名： urp_ZBinBuffer  urp_TileBuffer _FPParams0 _FPParams1 _FPParams2![20250219174052](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250219174052.png)
 
 
 - framebuffer fetch: use the ``SetInputAttachment`` API to set the output of a render pass as the input of the next render pass. keep the framebuffer stays in the on-chip memory, avoid the cost of the bandwidth caused by the acessing it from the video memory.
@@ -316,3 +359,5 @@ Deferred+:
       ```
   - 
 - Render Opaques Forward Only: 目前Target为ScalableLit 和 Fabric 的shadergraph 不支持Gbuffer的结构，会使用ForwardOnly. 此外Unlit的shader会走Gbuffer的渲染，但不会参与deferredLighting。其也在ForwardOnly阶段渲染。![20250321175443](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250321175443.png) -》 在延迟渲染中，GBuffer 存储了场景的几何信息（如法线、深度、材质属性等）。如果某些物体（如 Unlit 物体）不写入 GBuffer，会导致 GBuffer 中出现“空洞”（即缺失数据区域）。？？
+  这里以ComplexLit为例： 走 half4 UniversalFragmentPBR(InputData inputData, SurfaceData surfaceData)： 开启 USE_CLUSTER_LIGHT_LOOP， 先计算mainLight的LightingPhysicallyBased，再算 additional directional light， 最后算其他的additional light
+- 
