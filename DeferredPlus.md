@@ -221,13 +221,35 @@ LOD_FADE_CROSSFADE
         - viewPlaneBottom0 ： 视口偏移的下界
         - viewPlaneTop0 ： 视口偏移的上界
         - viewToViewportScaleBias0 ： 视口的缩放偏置参数；前两项记录scale，后两项记录offset
-      - TilingJob：
-      - TileRangeExpansionJob 
+      - TilingJob： 遍历各个光源+反射探针
+        - rangesPerItem： 计算每个光源/反射探针在内存中占用的 InclusiveRange 结构数量，并确保内存对齐（128 字节） ——》避免伪共享。 其每个element内的InclusiveRange会记录所有光源/反射探针影响的X方向上的Tile的范围。 其一般有 （1 + tileResolution.y）个inclusiveRange，其中的“1”记录Y方向上的受光的范围？？？
+        - tileRanges： 所有rangesPerItem组成的InclusiveRange数组
+        - Exectue: 初始tileRanges的数据，根据光源的类型调用不同的函数进行处理。
+        - TileLightOrthographic:  orth + light： 
+          - 计算光源原点在哪一个Tile中，在对应的tileRanges中的TileY位置放入记录TileX的inclusiveRange
+          - 计算光源包围的四个极值点在哪一个Tile中，在对应的TileY位置更新记录受影响的X方向Tile范围的inclusiveRange
+          - 如果是spot 光源的话，则计算锥体底面在XY平面上最大的XY分量最大的方向 circleUp， circleRight，然后计算XY方向上分量最大/最小的四个点在哪一个Tile中。
+          - 计算圆锥侧面与在屏幕空间的两条切线方向？？？
+          - 计算
+          - 以point light为例： 计算光源Tile位置， 更新该TileY的Xrange，更新全局的TileYRange。
+            - 计算光源包围球在XY方向的极值的Tile位置， 更新该TileY的Xrange，更新全局的TileYRange。
+            - 根据TileYRange的取值，
+        >  rangesPerItem: 第一项记录该光源在Y方向影响的Tile分区。 此后依次项记录该光影在Y方向Tile分区上，其影响的在X方向上的Tile分区。
+      - TileRangeExpansionJob： 遍历各个Y方向的Tile分区
+        - 遍历各个光源/reflection probe，记录该Y方向的Tile分区上，各个光源/反射探针在X方向的Tile分区上的影响的范围（itemRanges）。（剔除在该Y方向Tile分区没影响的光源/反射探针）![20250325171755](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250325171755.png)
+        - 遍历X方向上的各个Tile，提取itemRanges，itemIndices，查看该Tile的X序号是否在range内，如果有，则确认该Tile受该光源的影响。记录在m_TileMasks的一个bit上。
         - m_TileMasks: 包含一个uint，每个位上代表收影响的光源/反射探针的序号
   - SetupLights
     - if (m_UseForwardPlus)
       - m_ReflectionProbeManager.UpdateGpuData（传入 cullResults）： visibleReflectionProbes?
       - 设置对应参数在shader侧的命名： urp_ZBinBuffer  urp_TileBuffer _FPParams0 _FPParams1 _FPParams2![20250219174052](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250219174052.png)
+      - _FPParams0：
+        - m_ZBinScale
+        - m_ZBinOffset
+        - m_LightCount ： 光源的数量？
+        - m_DirectionalLightCount ： additional directional light的数量？？
+      - _FPParams1： xy -》 Tile 的XYsize？， z -》 tile的Xsize？？， w -> word
+      - _FPParams2: x -> Z方向划分的数量，y-》xy方向划分的数量
 
 
 - framebuffer fetch: use the ``SetInputAttachment`` API to set the output of a render pass as the input of the next render pass. keep the framebuffer stays in the on-chip memory, avoid the cost of the bandwidth caused by the acessing it from the video memory.
@@ -357,7 +379,12 @@ Deferred+:
         } 
       }
       ```
-  - 
+  - ClusterInit： 片元阶段
+    - 根据屏幕UV计算对应的在TileBuffer上的位置： ![20250325175757](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250325175757.png)
+    - 计算View空间下的深度，找到对应在ZbinBuffer上的位置。zBinBaseIndex 代表所在的zbin区块的headindex，向后跳过2个element才是开始记录受影响光源的信息
+    - zBinHeaderIndex / 4 使用element格式为float4，相当于一个element中存储了四个uint。element数量是c#层申请uint native array的 1/4.
+  - ClusterNext
+    - 当MAX_LIGHTS_PER_TILE > 32，即光源数量大于32个时。 entityIndexNextMax的后16位记录着maxIndex，需要计算的光源的最大数量。 entityIndexNextMax的前16位则记录当前读取的wordIndex，即正在读取wordIndex个 32light。 当该32个light结束渲染后，while (ClusterNext(_urp_internal_clusterIterator, lightIndex)) 会判断是否存在下一个32个light？？
 - Render Opaques Forward Only: 目前Target为ScalableLit 和 Fabric 的shadergraph 不支持Gbuffer的结构，会使用ForwardOnly. 此外Unlit的shader会走Gbuffer的渲染，但不会参与deferredLighting。其也在ForwardOnly阶段渲染。![20250321175443](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250321175443.png) -》 在延迟渲染中，GBuffer 存储了场景的几何信息（如法线、深度、材质属性等）。如果某些物体（如 Unlit 物体）不写入 GBuffer，会导致 GBuffer 中出现“空洞”（即缺失数据区域）。？？
   这里以ComplexLit为例： 走 half4 UniversalFragmentPBR(InputData inputData, SurfaceData surfaceData)： 开启 USE_CLUSTER_LIGHT_LOOP， 先计算mainLight的LightingPhysicallyBased，再算 additional directional light， 最后算其他的additional light
 - 
