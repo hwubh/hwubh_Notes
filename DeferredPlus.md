@@ -188,11 +188,11 @@ LOD_FADE_CROSSFADE
           （图a）如果NDC空间中沿Z方向划分，虽然符合我们的希望，但会使得精度分布过于偏向于近平面。
           （图b）如果View空间中沿Z方向划分，会使每块分配的深度相同，不符合我们的希望。近远平面的块过多。
           （图c）因此URP中选择在View空间中使用对数进行划分，在图二的基础上，给靠近近平面的分配更多的快。
-          > [参考链接](https://www.aortiz.me/2018/12/21/CG.html#tiled-shading--forward); [其他延申内容1](https://developer.nvidia.com/content/depth-precision-visualized)；[原论文](https://www.cse.chalmers.se/~uffe/clustered_shading_preprint.pdf)
+          > [参考链接](https://www.aortiz.me/2018/12/21/CG.html#tiled-shading--forward); [其他延申内容1](https://developer.nvidia.com/content/depth-precision-visualized)；[原论文](https://www.cse.chalmers.se/~uffe/clustered_shading_preprint.pdf) ; [公式来源](https://advances.realtimerendering.com/s2016/Siggraph2016_idTech6.pdf)
           > ![20250324154311](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250324154311.png)
           > 公式，图示：![20250324154543](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250324154543.png) 
       - probes： 将probe根据importance 从大到小进行排序。
-        > Unity 文档说着色计算是最多只用两个reflection probe，但 cluster时好像不是？？？ 
+        > Unity 文档说着色计算是最多只用两个reflection probe，但 cluster shader中计算时好像不是？？？ 
       - LightMinMaxZJob
         - minMaxZs （local）: 计算各个local光源（Point 和 Spot）影响的深度范围
           - Point： 计算该光源中心点在View空间下的深度值，加上/减去光的范围（range）
@@ -216,6 +216,7 @@ LOD_FADE_CROSSFADE
              589832： 1001 0000000000001000 ： 反射探针的最大序号为9， 最小为8
              899：               1110000011 ： 涉及的光源序号为0， 1， 7， 8， 9
              记录最大，最小序号的意义是？？
+        - 遍历光源/反射探针， 从minMaxZs得到其影响的最大/最小深度，根据深度找到对应的Zbin。 遍历在深度范围内的Zbin，依次更新其数据（header的光源序号最大，最小值； word中的bitmask）
       - GetViewParams： 传入投影矩阵 -》 主要用于VR的斜视投影
         - 正交时记录非对称正交投影的偏移； 投影时记录投影屏幕的偏移参数
         - viewPlaneBottom0 ： 视口偏移的下界
