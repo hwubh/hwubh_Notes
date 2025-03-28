@@ -388,4 +388,167 @@ Deferred+:
     - 当MAX_LIGHTS_PER_TILE > 32，即光源数量大于32个时。 entityIndexNextMax的后16位记录着maxIndex，需要计算的光源的最大数量。 entityIndexNextMax的前16位则记录当前读取的wordIndex，即正在读取wordIndex个 32light。 当该32个light结束渲染后，while (ClusterNext(_urp_internal_clusterIterator, lightIndex)) 会判断是否存在下一个32个light？？
 - Render Opaques Forward Only: 目前Target为ScalableLit 和 Fabric 的shadergraph 不支持Gbuffer的结构，会使用ForwardOnly. 此外Unlit的shader会走Gbuffer的渲染，但不会参与deferredLighting。其也在ForwardOnly阶段渲染。![20250321175443](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250321175443.png) -》 在延迟渲染中，GBuffer 存储了场景的几何信息（如法线、深度、材质属性等）。如果某些物体（如 Unlit 物体）不写入 GBuffer，会导致 GBuffer 中出现“空洞”（即缺失数据区域）。？？
   这里以ComplexLit为例： 走 half4 UniversalFragmentPBR(InputData inputData, SurfaceData surfaceData)： 开启 USE_CLUSTER_LIGHT_LOOP， 先计算mainLight的LightingPhysicallyBased，再算 additional directional light， 最后算其他的additional light
-- 
+
+
+--------------
+
+- testcode
+  using System;
+  using Unity.Mathematics;
+  using UnityEngine;
+
+  public class AABB : MonoBehaviour
+  {
+      public float angle = 0f;
+      public float test = 0f;
+      public enum Panel
+      {
+          XZ,
+          XY,
+          ZY
+      }
+
+      static float square(float x) => x * x;
+
+      // Update is called once per frame
+      void Update()
+      {
+          var radius = 6f;
+          var height = 8f;
+          var ray = new Vector3(-0.5f, -0.5f, angle).normalized;
+          var orientation = Quaternion.FromToRotation(Vector3.back, ray);
+          var lightOrigin = Vector3.zero;
+          var origin = lightOrigin + ray * height;
+          float3 rayValue = new float3(ray);
+          Debug.DrawLine(lightOrigin, origin, Color.red);
+          DrawCircle(origin, radius, Color.blue, Panel.XY, ray);
+          Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(radius, 0, 0), Color.blue);
+          Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(-radius, 0, 0), Color.blue);
+          Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(0, radius, 0), Color.blue);
+          Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(0, -radius, 0), Color.blue);
+
+          //Orth + sphereBound
+          //var range = 10f;
+          //DrawCircle(lightOrigin, range, Color.yellow, Panel.XY, Vector3.forward);
+
+          // Orth + circleBound
+          var range = 10f;
+          var circleCenter = lightOrigin + ray * height;
+          var circleRadius = math.sqrt(range * range - height * height);
+          var circleRadiusSq = square(circleRadius);
+          var circleUp = math.normalize(math.float3(0, 1, 0) - rayValue * rayValue.y);
+          var circleRight = math.normalize(math.float3(1, 0, 0) - rayValue * rayValue.x);
+          var centre = new float3(circleCenter);
+          var circleBoundY0 = centre - circleUp * circleRadius;
+          var circleBoundY1 = centre + circleUp * circleRadius;
+          var circleBoundX0 = centre - circleRight * circleRadius;
+          var circleBoundX1 = centre + circleRight * circleRadius;
+          Debug.DrawLine(centre, circleBoundY0, Color.yellow);
+          Debug.DrawLine(centre, circleBoundY1, Color.yellow);
+          Debug.DrawLine(centre, circleBoundX0, Color.yellow);
+          Debug.DrawLine(centre, circleBoundX1, Color.yellow);
+
+          var planeY = test;
+          Debug.DrawLine(new Vector3(-100, planeY, 0), new Vector3(100, planeY, 0), Color.black);
+
+          var intersectionDistance = (planeY - origin.y) / circleUp.y;
+          var closestPointX = origin.x + intersectionDistance * circleUp.x;
+          var intersectionDirX = -ray.z / math.length(math.float3(-ray.z, 0, ray.x));
+          var sideDistance = math.sqrt(square(radius) - square(intersectionDistance));
+          var circleX0 = closestPointX - sideDistance * intersectionDirX;
+          var circleX1 = closestPointX + sideDistance * intersectionDirX;
+          Debug.DrawLine(origin, new Vector3(circleX0, planeY, 0), Color.pink);
+          Debug.DrawLine(origin, new Vector3(circleX1, planeY, 0), Color.pink);
+
+
+          // Orth + Tile + Sphere
+          //var range = 10f;
+          //var planeY = -2f;
+          //Debug.DrawLine(new Vector3(-100, planeY, 0), new Vector3(100, planeY, 0), Color.black);
+          //var sphereX = math.sqrt(range * range - square(planeY - lightOrigin.y));
+          //var sphereX0 = math.float3(lightOrigin.x - sphereX, planeY, lightOrigin.z);
+          //var sphereX1 = math.float3(lightOrigin.x + sphereX, planeY, lightOrigin.z);
+          //Debug.DrawLine(lightOrigin, sphereX0, Color.black);
+          //Debug.DrawLine(lightOrigin, sphereX1, Color.black);
+          //DrawCircle(lightOrigin, range, Color.yellow, Panel.XY, Vector3.forward);
+
+          //Orth + Tile + Circle
+          //var sphereDistance = height + radius * radius / height;
+          //var sphereRadius = math.sqrt(square(radius * radius) / height / height + radius * radius);
+          //var directionXYSqInv = math.rcp(math.lengthsq(rayValue.xy));
+          //var polarIntersection = -radius * radius / height * directionXYSqInv * rayValue.xy;
+          //var polarDir = math.sqrt((square(sphereRadius) - math.lengthsq(polarIntersection)) * directionXYSqInv) * math.float2(rayValue.y, -rayValue.x);
+          //var conePBase = new float2(lightOrigin.x, lightOrigin.y) + sphereDistance * rayValue.xy + polarIntersection;
+          //var coneP0 = conePBase - polarDir;
+          //var coneP1 = conePBase + polarDir;
+          //Debug.DrawLine(new Vector3(coneP0.x, coneP0.y, 0f), new Vector3(conePBase.x, conePBase.y, 0f), Color.black);
+          //Debug.DrawLine(new Vector3(coneP1.x, coneP1.y, 0f), new Vector3(conePBase.x, conePBase.y, 0f), Color.black);
+
+          //var coneDir0X = coneP0.x - lightOrigin.x;
+          //var coneDir0YInv = math.rcp(coneP0.y - lightOrigin.y);
+          //var coneDir1X = coneP1.x - lightOrigin.x;
+          //var coneDir1YInv = math.rcp(coneP1.y - lightOrigin.y);
+
+          //var planeY = test;
+          //Debug.DrawLine(new Vector3(-100, planeY, 0), new Vector3(100, planeY, 0), Color.black);
+          //var deltaY = planeY - lightOrigin.y;
+          //var coneT0 = deltaY * coneDir0YInv;
+          //var coneT1 = deltaY * coneDir1YInv;
+          //if (coneT0 >= 0 && coneT0 <= 1)
+          //    Debug.DrawLine(lightOrigin, new Vector3(lightOrigin.x + coneT0 * coneDir0X, planeY, 0f), Color.pink);
+          //if (coneT1 >= 0 && coneT1 <= 1)
+          //    Debug.DrawLine(lightOrigin, new Vector3(lightOrigin.x + coneT1 * coneDir1X, planeY, 0f), Color.pink);
+      }
+
+      /// <summary>
+      /// 画线圈
+      /// </summary>
+      /// <param name="position">位置</param>
+      /// <param name="radius">半径</param>
+      /// <param name="color">颜色</param>
+      /// <param name="duration">持续时间</param>
+      /// <param name="displayPanel">显示座标轴</param>
+      /// <param name="detail">圆的线段数量 越小越多</param>
+      public static void DrawCircle(Vector3 position, float radius, Color color, Panel displayPanel, Vector3 normal, float detail = 0.1f)
+      {
+          Vector3 lastPoint = Vector3.zero, currentPoint = Vector3.zero;
+          var orientation = Quaternion.FromToRotation(Vector3.back, normal);
+          for (float theta = 0; theta < 2 * Mathf.PI; theta += detail)
+          {
+              float x = radius * Mathf.Cos(theta);
+              float z = radius * Mathf.Sin(theta);
+
+              Vector3 endPoint = Vector3.zero;
+              switch (displayPanel)
+              {
+                  case Panel.XZ:
+                      endPoint = orientation * new Vector3(x, 0, z) + position;
+                      break;
+                  case Panel.XY:
+                      endPoint = orientation * new Vector3(x, z, 0) + position;
+                      break;
+                  case Panel.ZY:
+                      endPoint = orientation * new Vector3(0, x, z) + position;
+                      break;
+                  default:
+                      throw new ArgumentOutOfRangeException(nameof(displayPanel), displayPanel, null);
+              }
+              
+
+              if (theta == 0)
+              {
+                  lastPoint = endPoint;
+              }
+              else
+              {
+                  Debug.DrawLine(currentPoint, endPoint, color);
+              }
+
+
+              currentPoint = endPoint;
+          }
+
+
+          Debug.DrawLine(lastPoint, currentPoint, color);
+      }
+  }

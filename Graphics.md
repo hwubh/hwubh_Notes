@@ -105,3 +105,4 @@
     - Tile-based：Vertex阶段逐subpass的，所有的subpass的vertex阶段后（结果写入一块内存中）才有Tile的划分。  ![20250313172611](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250313172611.png)
                   Fragment阶段是先逐Tile，即该tile所有subpass的fragment都依次执行完毕后，才执行下一个Tile。
   - 注意事项： Tile Memory 容量有限！ 
+  - https://www.zhihu.com/question/469595919 https://zeux.io/data/gdc2020_arm.pdf https://zhuanlan.zhihu.com/p/744643395 https://zhuanlan.zhihu.com/p/574540329 https://zhuanlan.zhihu.com/p/640672385 
