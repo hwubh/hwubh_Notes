@@ -235,6 +235,7 @@ LOD_FADE_CROSSFADE
           - 以point light为例： 计算光源Tile位置， 更新该TileY的Xrange，更新全局的TileYRange。
             - 计算光源包围球在XY方向的极值的Tile位置， 更新该TileY的Xrange，更新全局的TileYRange。
             - 根据TileYRange的取值，
+        - viewPlaneBottoms, viewPlaneTops 是 projectionMatrix [0,0] [1,1]的取倒，这一步就默认了viewPlaneBottoms, viewPlaneTops的取值是在视平面Z = 1 上的
         >  rangesPerItem: 第一项记录该光源在Y方向影响的Tile分区。 此后依次项记录该光影在Y方向Tile分区上，其影响的在X方向上的Tile分区。
       - TileRangeExpansionJob： 遍历各个Y方向的Tile分区
         - 遍历各个光源/reflection probe，记录该Y方向的Tile分区上，各个光源/反射探针在X方向的Tile分区上的影响的范围（itemRanges）。（剔除在该Y方向Tile分区没影响的光源/反射探针）![20250325171755](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250325171755.png)
