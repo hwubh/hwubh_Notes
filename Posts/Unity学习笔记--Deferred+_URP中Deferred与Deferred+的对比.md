@@ -6,4 +6,4 @@ Unity6.1版本中在URP中引入了新渲染路径[**Deferred+**]()。 本文主
 以下是正文：
 
 ## 前言
-Deferred+（Plus），其思路上
+Deferred+（Plus），其实就是Clustered Deferred Rendering。在URP可以视为Forward+ 和 Deferred的结合。 一方面同Forward+， 对

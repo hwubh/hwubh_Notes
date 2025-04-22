@@ -193,6 +193,7 @@ LOD_FADE_CROSSFADE
           > 公式，图示：![20250324154543](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250324154543.png) 
       - probes： 将probe根据importance 从大到小进行排序。
         > Unity 文档说着色计算是最多只用两个reflection probe，但 cluster shader中计算时好像不是？？？ 
+        > GlobalIllumination.hlsl 中，如果开了ClusterPlus的话，则是计算权重值直到0.99.反之只计算两个最重要（importance）的 反射探针
       - LightMinMaxZJob
         - minMaxZs （local）: 计算各个local光源（Point 和 Spot）影响的深度范围
           - Point： 计算该光源中心点在View空间下的深度值，加上/减去光的范围（range）
