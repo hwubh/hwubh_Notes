@@ -184,7 +184,7 @@ LOD_FADE_CROSSFADE
         - m_ZBinOffset = -camera.nearClipPlane * m_ZBinScale; -> offset
         - m_BinCount = (int)(camera.farClipPlane * m_ZBinScale + m_ZBinOffset) = (camera.farClipPlane - camera.nearClipPlane) * m_ZBinScale
         - ![20250324144021](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250324144021.png)
-          > 透视时使用对数的原因： 沿Z划分时，我们希望做到划分的各个每一块在屏幕占据的像素尽可能接近。 因此需要划分时，越靠近远平面时，每一块占据的深度越多。（因为越远的三角形投影到屏幕上时越小）。
+          > 透视时使用对数的原因： 沿Z划分时，我们希望做到每个Cluster分配到的片元数量/着色计算量尽可能接近？ 因此需要划分时，越靠近远平面时，Cluster占据的深度越大。（因为越远的三角形投影到屏幕上时越小，生成的片元数量也更少）。 
           （图a）如果NDC空间中沿Z方向划分，虽然符合我们的希望，但会使得精度分布过于偏向于近平面。
           （图b）如果View空间中沿Z方向划分，会使每块分配的深度相同，不符合我们的希望。近远平面的块过多。
           （图c）因此URP中选择在View空间中使用对数进行划分，在图二的基础上，给靠近近平面的分配更多的快。

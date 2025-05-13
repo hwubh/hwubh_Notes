@@ -37,8 +37,10 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
   float m_ZBinScale: Z方向单位距离上Zbin的数量。
   float m_ZBinOffset: 0~近平面间距离计算的Zbin数量，作为offset用于当前Zbin序号的计算。
   int m_BinCount: Z方向上Zbin的数量。
+  NativeArray<float2> minMaxZs: Local lights在相机空间的深度范围。
+  NativeArray<uint> m_ZBins: URP Z-Bin Buffer的数据，记录Zbin收到哪些Local lights的影响。
   ```
-  > 以上为下文会使用的一些全局变量的含义。
+  > 以上为下文会使用的一些变量的含义。
   - 计算 `m_LightCount`, `m_DirectionalLightCount`, `m_WordsPerTile`: 因为平行光源为全局影响，所以不参与Cluster的构建。
     ``` c#
     m_LightCount = lightData.visibleLights.Length;//光源的数量
@@ -99,5 +101,112 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
     Z方向上Zbin的划分。  \
     ![20250324154543](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250324154543.png) \
     参考资料: [A Primer On Efficient Rendering Algorithms & Clustered Shading](https://www.aortiz.me/2018/12/21/CG.html#tiled-shading--forward)； [Clustered Deferred and Forward Shading(论文)](https://www.cse.chalmers.se/~uffe/clustered_shading_preprint.pdf); 
-  > 这里对于Z方向的划分方式，感觉像是一种在均分NDC空间，View空间之间的权衡？
-  - 
+    
+    > 这里对于Z方向的划分方式，感觉像是一种在均分NDC空间，View空间这两种方案之间的权衡？
+  - 对反射探针`reflectionProbes`(`renderingData.cullResults.visibleReflectionProbes`)根据 [importance](https://docs.unity3d.com/6000.1/Documentation/ScriptReference/ReflectionProbe-importance.html) 从大到小重新进行排序。
+    ```c#
+    // Should probe come after otherProbe?
+    static bool IsProbeGreater(VisibleReflectionProbe probe, VisibleReflectionProbe otherProbe)
+    {
+        return probe.importance < otherProbe.importance ||
+            (probe.importance == otherProbe.importance && probe.bounds.extents.sqrMagnitude > otherProbe.bounds.extents.sqrMagnitude);
+    }
+
+    for (var i = 1; i < reflectionProbeCount; i++)
+    {
+        var probe = reflectionProbes[i];
+        var j = i - 1;
+        while (j >= 0 && IsProbeGreater(reflectionProbes[j], probe))
+        {
+            reflectionProbes[j + 1] = reflectionProbes[j];
+            j--;
+        }
+
+        reflectionProbes[j + 1] = probe;
+    }
+    ```
+  - `lightMinMaxZJob`： 计算各个Local lights中各个spot/point light影响的深度范围。
+    ``` c#
+    var lightMinMaxZJob = new LightMinMaxZJob
+    {
+        worldToViews = worldToViews,
+        lights = visibleLights,
+        minMaxZs = minMaxZs.GetSubArray(0, m_LightCount * viewCount)
+    };
+    // Innerloop batch count of 32 is not special, just a handwavy amount to not have too much scheduling overhead nor too little parallelism.
+    var lightMinMaxZHandle = lightMinMaxZJob.ScheduleParallel(m_LightCount * viewCount, 32, new JobHandle());
+    ``` 
+    先计算光源在View空间中的深度值，然后加上/减去光的范围。
+    ``` C#
+    var lightIndex = index % lights.Length;
+    var light = lights[lightIndex];
+    var lightToWorld = (float4x4)light.localToWorldMatrix;
+    var originWS = lightToWorld.c3.xyz;
+    var viewIndex = index / lights.Length;
+    var worldToView = worldToViews[viewIndex];
+    var originVS = math.mul(worldToView, math.float4(originWS, 1)).xyz;
+    originVS.z *= -1;
+
+    var minMax = math.float2(originVS.z - light.range, originVS.z + light.range);
+    ```
+    - Point light的深度范围： 光源在View空间中的深度值，加上/减去光的范围。
+    - Spot light的深度范围： =圆锥包围盒的范围在Z方向上的投影。 
+    ``` c#
+    if (light.lightType == LightType.Spot)
+    {
+        // Based on https://iquilezles.org/www/articles/diskbbox/diskbbox.htm
+        var angleA = math.radians(light.spotAngle) * 0.5f; // 锥体的半角
+        float cosAngleA = math.cos(angleA);
+        float coneHeight = light.range * cosAngleA; // 锥体的高度
+        float3 spotDirectionWS = lightToWorld.c2.xyz; // 光源朝向(局部空间+Z方向)在世界空间的表达
+        var endPointWS = originWS + spotDirectionWS * coneHeight; // 圆锥底面中心在世界空间的表达
+        var endPointVS = math.mul(worldToView, math.float4(endPointWS, 1)).xyz;// 圆锥底面中心在相机空间的表达
+        endPointVS.z *= -1;
+        var angleB = math.PI * 0.5f - angleA;
+        var coneRadius = light.range * cosAngleA * math.sin(angleA) / math.sin(angleB); // math.sin(angleA) / math.sin(angleB) = tan(angleA), 不写math.tan的原因?
+        var a = endPointVS - originVS;
+        var e = math.sqrt(1.0f - a.z * a.z / math.dot(a, a));
+
+        // `-a.z` and `a.z` is `dot(a, {0, 0, -1}).z` and `dot(a, {0, 0, 1}).z` optimized
+        // `cosAngleA` is multiplied by `coneHeight` to avoid normalizing `a`, which we know has length `coneHeight`
+        if (-a.z < coneHeight * cosAngleA) minMax.x = math.min(originVS.z, endPointVS.z - e * coneRadius);
+        if (a.z < coneHeight * cosAngleA) minMax.y = math.max(originVS.z, endPointVS.z + e * coneRadius);
+        //算锥体在Z方向的最大/最小值
+    }
+    ```
+    ![锥体](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250513143954.png)
+  - `ReflectionProbeMinMaxZJob`: 计算各个Local lights中各个反射探针影响的深度范围。
+    ``` c#
+    var reflectionProbeMinMaxZJob = new ReflectionProbeMinMaxZJob
+    {
+        worldToViews = worldToViews,
+        reflectionProbes = reflectionProbes,
+        minMaxZs = minMaxZs.GetSubArray(m_LightCount * viewCount, reflectionProbeCount * viewCount)
+    };
+    var reflectionProbeMinMaxZHandle = reflectionProbeMinMaxZJob.ScheduleParallel(reflectionProbeCount * viewCount, 32, lightMinMaxZHandle);
+    ```
+    遍历反射探针的包围盒的各个顶点，计算其在相机空间Z方向的投影。
+    ``` c#
+    var minMax = math.float2(float.MaxValue, float.MinValue);
+    var reflectionProbeIndex = index % reflectionProbes.Length;
+    var reflectionProbe = reflectionProbes[reflectionProbeIndex];
+    var viewIndex = index / reflectionProbes.Length;
+    var worldToView = worldToViews[viewIndex];
+    var centerWS = (float3)reflectionProbe.bounds.center;
+    var extentsWS = (float3)reflectionProbe.bounds.extents;
+    for (var i = 0; i < 8; i++)
+    {
+        // Convert index to x, y, and z in [-1, 1]
+        var x = ((i << 1) & 2) - 1;
+        var y = (i & 2) - 1;
+        var z = ((i >> 1) & 2) - 1;
+        var cornerVS = math.mul(worldToView, math.float4(centerWS + extentsWS * math.float3(x, y, z), 1));
+        cornerVS.z *= -1;
+        minMax.x = math.min(minMax.x, cornerVS.z);
+        minMax.y = math.max(minMax.y, cornerVS.z);
+    }
+
+    minMaxZs[index] = minMax;
+    ```
+  - `ZBinningJob`： 每128个Zbin分为一个batch，在不同的worker上计算。 计算Local lights对Zbin的影响，填充m_ZBins。 数据结构参见上文 **URP Z-Bin Buffer** 的内容。
+    - 遍历Local lights，从 `minMaxZs`中得到该光源/反射探针影响的深度范围。根据深度范围的最大/最小
