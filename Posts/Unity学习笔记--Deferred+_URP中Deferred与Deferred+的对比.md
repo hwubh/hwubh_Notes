@@ -7,7 +7,7 @@ Unity6.1版本中在URP中引入了新渲染路径[**Deferred+**]()。 本文主
 以下是正文：
 
 ## 前言
-Deferred+，其实就是Clustered Deferred Rendering的一种实现。在URP可以视为Forward+ 和 Deferred的结合。 在Deferred Rendering的基础上，引入了Forward+ 中的分簇着色（Clustered Shading）。 
+Deferred+，其实就是Clustered Deferred Rendering的一种实现。在URP可以视为Forward+ 和 Deferred的结合。 其在Deferred Rendering的基础上，引入了Forward+ 中的分簇着色（Clustered Shading）。 
 下文中主要针对URP中Cluster的构建，以及引入Cluster后Deferred rendering的修改进行介绍。
 > 关于Deferred Rendering的原理可以参见这篇文章
 <!-- 一方面同Forward+， 对视锥体从XY（Tile） 和 Z （Zbin） 两个“维度”上进行了分割，并计算各个被分割区域受到哪些*非平行（additional）光源*和反射探针的影响。 -->
@@ -39,6 +39,7 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
   int m_BinCount: Z方向上Zbin的数量。
   NativeArray<float2> minMaxZs: Local lights在相机空间的深度范围。
   NativeArray<uint> m_ZBins: URP Z-Bin Buffer的数据，记录Zbin收到哪些Local lights的影响。
+  int itemsPerTile: Local lights的数量。
   ```
   > 以上为下文会使用的一些变量的含义。
   - 计算 `m_LightCount`, `m_DirectionalLightCount`, `m_WordsPerTile`: 因为平行光源为全局影响，所以不参与Cluster的构建。
@@ -209,4 +210,182 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
     minMaxZs[index] = minMax;
     ```
   - `ZBinningJob`： 每128个Zbin分为一个batch，在不同的worker上计算。 计算Local lights对Zbin的影响，填充m_ZBins。 数据结构参见上文 **URP Z-Bin Buffer** 的内容。
-    - 遍历Local lights，从 `minMaxZs`中得到该光源/反射探针影响的深度范围。根据深度范围的最大/最小
+    - 遍历Local lights，从 `minMaxZs`中得到该光源/反射探针影响的深度范围。根据深度范围的最大/最小值计算得到其对应的Zbin，更新这两个Zbin之间所有的Zbin的数据。
+    ``` C#
+    void FillZBins(int binStart, int binEnd, int itemStart, int itemEnd, int headerIndex, int itemOffset, int binOffset)
+    {
+        for (var index = itemStart; index < itemEnd; index++) // 遍历Local lights 
+        {
+            var minMax = minMaxZs[itemOffset + index];
+            var minBin = math.max((int)((isOrthographic ? minMax.x : math.log2(minMax.x)) * zBinScale + zBinOffset), binStart);
+            var maxBin = math.min((int)((isOrthographic ? minMax.y : math.log2(minMax.y)) * zBinScale + zBinOffset), binEnd); // 分别计算min，max Zbin。
+
+            var wordIndex = index / 32; // 光源序号记录在第（2+wordIndex）个uint上。
+            var bitMask = 1u << (index % 32); // 光源序号记录在第bitMask位上。
+
+            for (var binIndex = minBin; binIndex <= maxBin; binIndex++)
+            {
+                var baseIndex = (binOffset + binIndex) * (headerLength + wordsPerTile);
+                var (minIndex, maxIndex) = DecodeHeader(bins[baseIndex + headerIndex]); // headerIndex： 写入第几个uint，取值为0或1，分别代表光源和反射探针。
+                minIndex = math.min(minIndex, (uint)index);
+                maxIndex = math.max(maxIndex, (uint)index);
+                bins[baseIndex + headerIndex] = EncodeHeader(minIndex, maxIndex); // 更新第1或2个uint记录的最大/最小光源，反射探针数据。
+                bins[baseIndex + headerLength + wordIndex] |= bitMask;// 更新受影响的local lights数据。
+            }
+        }
+    }
+    ``` 
+  - `viewToViewportScaleBias`: 传入投影矩阵, 计算投影矩阵的偏移。个人感觉XR用的情况比较多？？
+    - 正交时计算非对称正交投影的偏移； 投影计算投影屏幕的偏移参数。
+    - viewPlaneBottom0 ： 视口偏移的下界
+    - viewPlaneTop0 ： 视口偏移的上界
+    - viewToViewportScaleBias0 ： 视口的缩放偏置参数；前两项记录scale，后两项记录offset
+    ``` c#
+    GetViewParams(camera, viewToClips[0], out float viewPlaneBottom0, out float viewPlaneTop0, out float4 viewToViewportScaleBias0);
+    GetViewParams(camera, viewToClips[1], out float viewPlaneBottom1, out float viewPlaneTop1, out float4 viewToViewportScaleBias1);
+
+    // Calculate view planes and viewToViewportScaleBias. This handles projection center in case the projection is off-centered
+    void GetViewParams(Camera camera, float4x4 viewToClip, out float viewPlaneBot, out float viewPlaneTop, out float4 viewToViewportScaleBias)
+    {
+        // We want to calculate `fovHalfHeight = tan(fov / 2)`
+        // `projection[1][1]` contains `1 / tan(fov / 2)`
+        var viewPlaneHalfSizeInv = math.float2(viewToClip[0][0], viewToClip[1][1]);
+        var viewPlaneHalfSize = math.rcp(viewPlaneHalfSizeInv);
+        var centerClipSpace = camera.orthographic ? -math.float2(viewToClip[3][0], viewToClip[3][1]): math.float2(viewToClip[2][0], viewToClip[2][1]);
+
+        viewPlaneBot = centerClipSpace.y * viewPlaneHalfSize.y - viewPlaneHalfSize.y;
+        viewPlaneTop = centerClipSpace.y * viewPlaneHalfSize.y + viewPlaneHalfSize.y;
+        viewToViewportScaleBias = math.float4(
+            viewPlaneHalfSizeInv * 0.5f,
+            -centerClipSpace * 0.5f + 0.5f
+        );
+    }
+    ``` 
+  - `TilingJob`: 计算各个Local lights影响的XY平面上的范围。
+    - `rangesPerItem`: 计算每个光源/反射探针在内存中占用的 *InclusiveRange* 结构数量，并确保内存对齐（128 字节为单位），避免伪共享。 
+      - *InclusiveRange*: 记录受该local light影响的Tile在一个维度上的范围。 
+        每个*InclusiveRange*含两个 *short* 成员变量： `start`, `end`。 分别对应范围边缘的Tile的序号。
+      - 每个`rangesPerItem` 有 （1 + m_TileResolution.y）个 *InclusiveRange*。 其中 “1” 的部分记录Y方向上该local light影响的Tile的**行（row）**的范围。 “m_TileResolution.y”的部分，分别代表每一行上，在X方向上该local light影响的Tile的**纵（column）**的范围。 二者重复部分的Tile，则为受该local light影响的Tile。 \
+      以下图为例： m_TileResolution = (10, 30), 存在一个Point light在XY平面上投影为红圈。其第“1”的*InclusiveRange*的 `start`, `end`取值为2，29。 第15个*InclusiveRange*代表行14上的范围，`start`, `end`取值为D，H。 ![20250514115345](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250514115345.png)
+    - `tileRanges`： *InclusiveRange*数组， `rangesPerItem`的集合，汇总所有Local lights影响Tile的范围。
+    ```c#
+    // Each light needs 1 range for Y, and a range per row. Align to 128-bytes to avoid false sharing.
+    var rangesPerItem = AlignByteCount((1 + m_TileResolution.y) * UnsafeUtility.SizeOf<InclusiveRange>(), 128) / UnsafeUtility.SizeOf<InclusiveRange>();
+    var tileRanges = new NativeArray<InclusiveRange>(rangesPerItem * itemsPerTile * viewCount, Allocator.TempJob);
+    ```
+    - Execute(): 根据光源类型，相机的投影方式调用不同的函数进行处理，得到Local light影响的Tile的范围。 这里存在Spot/Point，正交/透视两两组合，加上反射探针共5种情况。
+    ``` C#
+    public void Execute(int jobIndex)
+    {
+        var index = jobIndex % itemsPerTile;
+        m_ViewIndex = jobIndex / itemsPerTile;
+        m_Offset = jobIndex * rangesPerItem; // 该Local light在 tileRanges上的初始位置。
+
+        m_TileYRange = new InclusiveRange(short.MaxValue, short.MinValue); // tileRanges[m_Offset] = m_TileYRange; “1” 代表的Y方向的取值。
+
+        for (var i = 0; i < rangesPerItem; i++)
+        {
+            tileRanges[m_Offset + i] = new InclusiveRange(short.MaxValue, short.MinValue);
+        }
+
+
+        if (index < lights.Length)
+        {
+            if (isOrthographic) { TileLightOrthographic(index); } //正交投影
+            else { TileLight(index); } //透视投影
+        }
+        else { TileReflectionProbe(index); } //反射探针
+    }
+    ``` 
+      - Spot/Point Lights： 以下例子中使用 光源位置为（0，0，0），light.range为10的point light。光源位置为(0,0,0), 光源方向为(1.0, 1.0, 1.0), light.range为10， 圆锥高度为8， 底面圆半径为6的 spot light。 相机朝向为+Z方向。
+      - 正交： 
+        - 计算圆心在XY平面上的投影，更新在`tileRanges`上的取值范围。
+          ``` C#
+          void TileLightOrthographic(int lightIndex)
+          {
+              var light = lights[lightIndex];
+              var lightToWorld = (float4x4)light.localToWorldMatrix;
+              var lightPosVS = math.mul(worldToViews[m_ViewIndex], math.float4(lightToWorld.c3.xyz, 1)).xyz;
+              lightPosVS.z *= -1;
+              ExpandOrthographic(lightPosVS);
+              //...
+          }
+          ```
+          > ExpandOrthographic(float3 positionVS):相机空间 -> 屏幕空间 -> Tile序号。根据Tile序号更新该光源Y方向的取值范围，和Tile所在行的X方向的取值范围。
+            ``` c#
+            /// <summary>
+            /// Expands the tile Y range and the X range in the row containing the position.
+            /// </summary>
+            void ExpandOrthographic(float3 positionVS)
+            {
+                // var positionTS = math.clamp(ViewToTileSpace(positionVS), 0, tileCount - 1);
+                var positionTS = ViewToTileSpaceOrthographic(positionVS);
+                var tileY = (int)positionTS.y;
+                var tileX = (int)positionTS.x;
+                m_TileYRange.Expand((short)math.clamp(tileY, 0, tileCount.y - 1));
+                if (tileY >= 0 && tileY < tileCount.y && tileX >= 0 && tileX < tileCount.x)
+                {
+                    var rowXRange = tileRanges[m_Offset + 1 + tileY];
+                    rowXRange.Expand((short)tileX);
+                    tileRanges[m_Offset + 1 + tileY] = rowXRange;
+                }
+            }
+            ```
+        - 计算光源在相机空间的朝向 
+          ``` C#
+          var lightDirVS = math.mul(worldToViews[m_ViewIndex], math.float4(lightToWorld.c2.xyz, 0)).xyz;
+          lightDirVS.z *= -1;
+          lightDirVS = math.normalize(lightDirVS);
+          ```
+        - 计算光源的包围球在XY平面上的圆形投影，根据light.range得到其在XY方向的四个极值点。
+          ``` C#
+          var range = light.range;
+          var sphereBoundY0 = lightPosVS - math.float3(0, range, 0);
+          var sphereBoundY1 = lightPosVS + math.float3(0, range, 0);
+          var sphereBoundX0 = lightPosVS - math.float3(range, 0, 0);
+          var sphereBoundX1 = lightPosVS + math.float3(range, 0, 0);
+          ExpandOrthographic(sphereBoundY0);
+          ExpandOrthographic(sphereBoundY0);
+          ExpandOrthographic(sphereBoundY0);
+          ExpandOrthographic(sphereBoundY0);
+          ``` 
+          **Spot Light**的话，需要额外判断该极值点是否在其**圆锥**的影响范围内，不在的话，抛弃该极值点。
+          ``` C#
+          var halfAngle = math.radians(light.spotAngle * 0.5f);
+          var cosHalfAngle = math.cos(halfAngle);
+          //...
+          bool SpherePointIsValid(float3 p) => light.lightType == LightType.Point ||
+                math.dot(math.normalize(p - lightPosVS), lightDirVS) >= cosHalfAngle; // 比较角度的cos值 -> cos值较大时，角度较小，因而在圆锥内。
+          //...
+          if (SpherePointIsValid(sphereBoundY0)) ExpandOrthographic(sphereBoundY0);
+          if (SpherePointIsValid(sphereBoundY1)) ExpandOrthographic(sphereBoundY1);
+          if (SpherePointIsValid(sphereBoundX0)) ExpandOrthographic(sphereBoundX0);
+          if (SpherePointIsValid(sphereBoundX1)) ExpandOrthographic(sphereBoundX1);
+          ``` 
+          ![20250514161608](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250514161608.png)
+          ![20250514162044](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250514162044.png)
+          > 这个例子中，明显极值点不在Spot light的圆锥内，故会被抛弃。
+        - Spot Light还需要考虑底面圆在XY平面上的投影： 先计算底面圆圆心的位置，然后根据XY坐标轴单位向量在底面上的投影，计算出底面在XY平面上的极值点。
+          ```C#
+            var rangeSq = square(range);
+
+            
+            var circleCenter = lightPosVS + lightDirVS * coneHeight;
+            var circleRadius = math.sqrt(rangeSq - coneHeightSq);
+            var circleRadiusSq = square(circleRadius);
+            var circleUp = math.normalize(math.float3(0, 1, 0) - lightDirVS * lightDirVS.y);
+            var circleRight = math.normalize(math.float3(1, 0, 0) - lightDirVS * lightDirVS.x);
+            var circleBoundY0 = circleCenter - circleUp * circleRadius;
+            var circleBoundY1 = circleCenter + circleUp * circleRadius;
+
+            if (light.lightType == LightType.Spot)
+            {
+                var circleBoundX0 = circleCenter - circleRight * circleRadius;
+                var circleBoundX1 = circleCenter + circleRight * circleRadius;
+                ExpandOrthographic(circleBoundY0);
+                ExpandOrthographic(circleBoundY1);
+                ExpandOrthographic(circleBoundX0);
+                ExpandOrthographic(circleBoundX1);
+            }
+          ``` 
+      - 
