@@ -365,11 +365,11 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
           ![20250514161608](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250514161608.png)
           ![20250514162044](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250514162044.png)
           > 这个例子中，明显极值点不在Spot light的圆锥内，故会被抛弃。
-        - Spot Light还需要考虑底面圆在XY平面上的投影： 先计算底面圆圆心的位置，然后根据XY坐标轴单位向量在底面上的投影，计算出底面在XY平面上的极值点。
+        - Spot Light还需要考虑底面圆在XY平面上的投影： 先计算底面圆圆心`circleCenter`的位置，然后根据XY坐标轴单位向量在底面上的投影，计算出底面在XY平面上的极值点`circleBoundY0/Y1/X0/X1`。
           ```C#
             var rangeSq = square(range);
 
-            
+
             var circleCenter = lightPosVS + lightDirVS * coneHeight;
             var circleRadius = math.sqrt(rangeSq - coneHeightSq);
             var circleRadiusSq = square(circleRadius);
@@ -388,4 +388,284 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
                 ExpandOrthographic(circleBoundX1);
             }
           ``` 
-      - 
+          ![20250522110235](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250522110235.png)
+        - 逐行计算Tile在X方向上受影响的范围： 逐行计算X方向上的直线 Y = PlaneY 与光源影响范围在XY平面上的交点，交点之间的的Tile被标记为受该光源的影响。
+          - Y = PlaneY 的取值为每一行Tile的上边在XY平面的Y值，其结果同时作用于与以其为上边，下边的两行Tile。
+            ``` C#
+            // Tile plane ranges
+            for (var planeIndex = m_TileYRange.start + 1; planeIndex <= m_TileYRange.end; planeIndex++) // 遍历受影响的所有Tile行
+            {
+              var planeRange = InclusiveRange.empty; // 记录X方向上Tile受影响的范围。
+              var planeY = math.lerp(viewPlaneBottoms[m_ViewIndex], viewPlaneTops[m_ViewIndex], planeIndex * tileScaleInv.y); // 使用每一行Tile的上边所在的直线。
+
+              // ...
+
+              var tileIndex = m_Offset + 1 + planeIndex;
+              tileRanges[tileIndex] = InclusiveRange.Merge(tileRanges[tileIndex], planeRange); // 结果写入以其为下边的Tile行的受影响范围。
+              tileRanges[tileIndex - 1] = InclusiveRange.Merge(tileRanges[tileIndex - 1], planeRange);// 结果写入以其为上边的Tile行的受影响范围。
+            }
+            ``` 
+          - Tile是否在Light 包围球的XY投影内： 计算直线 Y = PlanY 与光源包围球在XY平面投影上的交点`sphereX0/X1`。 计算交点所在的Tile坐标，记录该光源在二者及其之间的Tile上。 
+            - 若光源为Spot Light，需要计算交点是否在其**圆锥**的影响范围内，不在的话，抛弃该交点。
+            ``` C#
+            var sphereX = math.sqrt(rangeSq - square(planeY - lightPosVS.y));
+            var sphereX0 = math.float3(lightPosVS.x - sphereX, planeY, lightPosVS.z);
+            var sphereX1 = math.float3(lightPosVS.x + sphereX, planeY, lightPosVS.z);
+            if (SpherePointIsValid(sphereX0)) { ExpandRangeOrthographic(ref planeRange, sphereX0.x); }
+            if (SpherePointIsValid(sphereX1)) { ExpandRangeOrthographic(ref planeRange, sphereX1.x); }
+            ```
+            ![20250522115002](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250522115002.png)
+          - **Spot Light**还需要计算Tile是否在锥体或底面圆的XY平面投影的范围内的情况：
+            - 计算Y = PlaneY与锥体投影的交点，即计算Y = PlaneY与到底面圆XY平面投影的两条切线的交点。
+              ``` C#
+                // Find two lines in screen-space for the cone if the light is a spot.
+                float coneDir0X = 0, coneDir0YInv = 0, coneDir1X = 0, coneDir1YInv = 0;
+                if (light.lightType == LightType.Spot)
+                {
+                    // Distance from light position to and radius of sphere fitted to the end of the cone.
+                    var sphereDistance = coneHeight + circleRadiusSq * coneHeightInv;
+                    var sphereRadius = math.sqrt(square(circleRadiusSq) * coneHeightInvSq + circleRadiusSq); // sphereDistance, sphereRadius, 切点到圆心线段构成一个直角三角形，根据相似三角形可以得到切点到圆心的距离。
+                    var directionXYSqInv = math.rcp(math.lengthsq(lightDirVS.xy));
+                    var polarIntersection = -circleRadiusSq * coneHeightInv * directionXYSqInv * lightDirVS.xy;
+                    var polarDir = math.sqrt((square(sphereRadius) - math.lengthsq(polarIntersection)) * directionXYSqInv) * math.float2(lightDirVS.y, -lightDirVS.x); // 将sphereDistance， sphereRadius投影到XY平面上，利用相似三角形进行计算。
+                    var conePBase = lightPosVS.xy + sphereDistance * lightDirVS.xy + polarIntersection;
+                    var coneP0 = conePBase - polarDir;
+                    var coneP1 = conePBase + polarDir; // 切线与底面圆的交点在XY平面上的投影。
+
+                    coneDir0X = coneP0.x - lightPosVS.x;
+                    coneDir0YInv = math.rcp(coneP0.y - lightPosVS.y);
+                    coneDir1X = coneP1.x - lightPosVS.x;
+                    coneDir1YInv = math.rcp(coneP1.y - lightPosVS.y); // 切线在XY平面上的变化率。
+                }
+
+                // Cone
+                var deltaY = planeY - lightPosVS.y;
+                var coneT0 = deltaY * coneDir0YInv;
+                var coneT1 = deltaY * coneDir1YInv;
+                if (coneT0 >= 0 && coneT0 <= 1) { ExpandRangeOrthographic(ref planeRange, lightPosVS.x + coneT0 * coneDir0X); }
+                if (coneT1 >= 0 && coneT1 <= 1) { ExpandRangeOrthographic(ref planeRange, lightPosVS.x + coneT1 * coneDir1X); } // 根据变化率与Y方向的差值，得到X方向上的差值
+              ``` 
+              ![20250522151333](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250522151333.png) 
+              > 上图的光源朝向为(1f, 1f, 0.4f)
+            - 计算Y = PlaneY与底面圆投影的交点。
+              ``` c#
+              // Circle
+              if (planeY >= circleBoundY0.y && planeY <= circleBoundY1.y)
+              {
+                  var intersectionDistance = (planeY - circleCenter.y) / circleUp.y; //根据Y
+                  var closestPointX = circleCenter.x + intersectionDistance * circleUp.x;
+                  var intersectionDirX = -lightDirVS.z / math.length(math.float3(-lightDirVS.z, 0, lightDirVS.x));
+                  var sideDistance = math.sqrt(square(circleRadius) - square(intersectionDistance));
+                  var circleX0 = closestPointX - sideDistance * intersectionDirX;
+                  var circleX1 = closestPointX + sideDistance * intersectionDirX;
+                  ExpandRangeOrthographic(ref planeRange, circleX0);
+                  ExpandRangeOrthographic(ref planeRange, circleX1);
+              }
+              ``` 
+              ![20250522155808](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250522155808.png)
+      - 透视：
+        - 计算圆心在XY平面上的投影，更新在`tileRanges`上的取值范围。
+          ``` c#
+          void TileLight(int lightIndex)
+          {
+            var light = lights[lightIndex];
+            if (light.lightType != LightType.Point && light.lightType != LightType.Spot)
+            {
+                return;
+            }
+
+            var lightToWorld = (float4x4)light.localToWorldMatrix;
+            var lightPositionVS = math.mul(worldToViews[m_ViewIndex], math.float4(lightToWorld.c3.xyz, 1)).xyz;
+            lightPositionVS.z *= -1;
+            if (lightPositionVS.z >= near) ExpandY(lightPositionVS);
+          }
+
+          /// <summary>
+          /// Project onto Z=1, scale and offset into [0, tileCount]
+          /// </summary>
+          float2 ViewToTileSpaceOrthographic(float3 positionVS)
+          {
+              return (positionVS.xy * viewToViewportScaleBiases[m_ViewIndex].xy + viewToViewportScaleBiases[m_ViewIndex].zw) * tileScale;
+          }
+          ``` 
+          > 思路与正交投影的方式类似。相机空间 -> 屏幕空间 -> Tile序号。
+          ``` C#
+          /// <summary>
+          /// Expands the tile Y range and the X range in the row containing the position.
+          /// </summary>
+          void ExpandY(float3 positionVS)
+          {
+              // var positionTS = math.clamp(ViewToTileSpace(positionVS), 0, tileCount - 1);
+              var positionTS = ViewToTileSpace(positionVS);
+              var tileY = (int)positionTS.y;
+              var tileX = (int)positionTS.x;
+              m_TileYRange.Expand((short)math.clamp(tileY, 0, tileCount.y - 1));
+              if (tileY >= 0 && tileY < tileCount.y && tileX >= 0 && tileX < tileCount.x)
+              {
+                  var rowXRange = tileRanges[m_Offset + 1 + tileY];
+                  rowXRange.Expand((short)tileX);
+                  tileRanges[m_Offset + 1 + tileY] = rowXRange;
+              }
+          }
+
+          /// <summary>
+          /// Project onto Z=1, scale and offset into [0, tileCount]
+          /// </summary>
+          float2 ViewToTileSpace(float3 positionVS)
+          {
+              return (positionVS.xy / positionVS.z * viewToViewportScaleBiases[m_ViewIndex].xy + viewToViewportScaleBiases[m_ViewIndex].zw) * tileScale;
+          }
+          ```
+        - 计算光源的包围球在XY平面上的圆形投影。 因为透视投影下，相机X，Y方向上可能因为aspect的取值而存在FOV不同的情况。因此需要将包围球分别投影在XZ, YZ平面上，分别进行计算X，Y方向上的极值点`sphereBoundY0/Y1/X0/X1`。
+          ``` C#
+          var halfAngle = math.radians(light.spotAngle * 0.5f);
+          var range = light.range;
+          var rangesq = square(range);
+          var cosHalfAngle = math.cos(halfAngle);
+
+          // Radius of circle formed by intersection of sphere and near plane.
+          // Found using Pythagoras with a right triangle formed by three points:
+          // (a) light position
+          // (b) light position projected to near plane
+          // (c) a point on the near plane at a distance `range` from the light position
+          //     (i.e. lies both on the sphere and the near plane)
+          // Thus the hypotenuse is formed by (a) and (c) with length `range`, and the known side is formed
+          // by (a) and (b) with length equal to the distance between the near plane and the light position.
+          // The remaining unknown side is formed by (b) and (c) with length equal to the radius of the circle.
+          // m_ClipCircleRadius = sqrt(sq(light.range) - sq(m_Near - m_LightPosition.z));
+          var sphereClipRadius = math.sqrt(rangesq - square(near - lightPositionVS.z));
+
+          // Assumes a point on the sphere, i.e. at distance `range` from the light position.
+          // If spot light, we check the angle between the direction vector from the light position and the light direction vector.
+          // Note that division by range is to normalize the vector, as we know that the resulting vector will have length `range`.
+          bool SpherePointIsValid(float3 p) => light.lightType == LightType.Point ||
+              math.dot(math.normalize(p - lightPositionVS), lightDirectionVS) >= cosHalfAngle;
+
+          // Project light sphere onto YZ plane, find the horizon points, and re-construct view space position of found points.
+          // CalculateSphereYBounds(lightPositionVS, range, near, sphereClipRadius, out var sphereBoundY0, out var sphereBoundY1);
+          GetSphereHorizon(lightPositionVS.yz, range, near, sphereClipRadius, out var sphereBoundYZ0, out var sphereBoundYZ1);
+          var sphereBoundY0 = math.float3(lightPositionVS.x, sphereBoundYZ0);
+          var sphereBoundY1 = math.float3(lightPositionVS.x, sphereBoundYZ1);
+          if (SpherePointIsValid(sphereBoundY0)) ExpandY(sphereBoundY0);
+          if (SpherePointIsValid(sphereBoundY1)) ExpandY(sphereBoundY1);
+
+          // Project light sphere onto XZ plane, find the horizon points, and re-construct view space position of found points.
+          GetSphereHorizon(lightPositionVS.xz, range, near, sphereClipRadius, out var sphereBoundXZ0, out var sphereBoundXZ1);
+          var sphereBoundX0 = math.float3(sphereBoundXZ0.x, lightPositionVS.y, sphereBoundXZ0.y);
+          var sphereBoundX1 = math.float3(sphereBoundXZ1.x, lightPositionVS.y, sphereBoundXZ1.y);
+          if (SpherePointIsValid(sphereBoundX0)) ExpandY(sphereBoundX0);
+          if (SpherePointIsValid(sphereBoundX1)) ExpandY(sphereBoundX1);
+          ``` 
+          - 这里以投影到YZ平面上为例: 计算相机与投影圆的切线，切点。 需要考虑以下两种情况，
+            ``` C#
+            /// <summary>
+            /// Finds the two horizon points seen from (0, 0) of a sphere projected onto either XZ or YZ. Takes clipping into account.
+            /// </summary>
+            static void GetSphereHorizon(float2 center, float radius, float near, float clipRadius, out float2 p0, out float2 p1)
+            {
+                var direction = math.normalize(center);
+
+                // Distance from camera to center of sphere
+                var d = math.length(center);
+
+                // Distance from camera to sphere horizon edge
+                var l = math.sqrt(d * d - radius * radius);
+
+                // Height of circle horizon
+                var h = l * radius / d;
+
+                // Center of circle horizon
+                var c = direction * (l * h / radius);
+
+                p0 = math.float2(float.MinValue, 1f);
+                p1 = math.float2(float.MaxValue, 1f);
+
+                // Handle clipping
+                if (center.y - radius < near)
+                {
+                    p0 = math.float2(center.x + clipRadius, near);
+                    p1 = math.float2(center.x - clipRadius, near);
+                }
+
+                // Circle horizon points
+                var c0 = c + math.float2(-direction.y, direction.x) * h;
+                if (square(d) >= square(radius) && c0.y >= near)
+                {
+                    if (c0.x > p0.x) { p0 = c0; }
+                    if (c0.x < p1.x) { p1 = c0; }
+                }
+
+                var c1 = c + math.float2(direction.y, -direction.x) * h; // c0, c1 -> 切点
+                if (square(d) >= square(radius) && c1.y >= near)
+                {
+                    if (c1.x > p0.x) { p0 = c1; }
+                    if (c1.x < p1.x) { p1 = c1; }
+                }
+            }
+            ``` 
+            ![20250522172445](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250522172445.png)
+        - 如果光源为Spot Light：
+  - `TileRangeExpansionJob`: 将`TilingJob`中计算的结果写入`m_TileMasks`中。 遍历各个Y方向的Tile分区（遍历Tile行）
+    - 遍历各个Local lights，记录该Y方向的Tile分区上，各个Local lights在X方向的Tile分区上的影响的范围（itemRanges）。（剔除在该Y方向Tile分区没影响的光源/反射探针）
+      ``` C#
+      var rowIndex = jobIndex % tileResolution.y;
+      var viewIndex = jobIndex / tileResolution.y;
+      var compactCount = 0;
+      var itemIndices = new NativeArray<short>(itemsPerTile, Allocator.Temp);
+      var itemRanges = new NativeArray<InclusiveRange>(itemsPerTile, Allocator.Temp);
+
+      // Compact the light ranges for the current row.
+      for (var itemIndex = 0; itemIndex < itemsPerTile; itemIndex++)
+      {
+          var range = tileRanges[viewIndex * rangesPerItem * itemsPerTile + itemIndex * rangesPerItem + 1 + rowIndex];
+          if (!range.isEmpty)
+          {
+              itemIndices[compactCount] = (short)itemIndex;
+              itemRanges[compactCount] = range;
+              compactCount++;
+          }
+      }
+      ``` 
+    - 遍历X方向上的各个Tile，提取itemRanges，itemIndices，查看该Tile的X序号是否在range内，如果有，则确认该Tile受该光源的影响。记录在m_TileMasks的一个bit上。
+      ```C#
+      var rowBaseMaskIndex = viewIndex * wordsPerTile * tileResolution.x * tileResolution.y + rowIndex * wordsPerTile * tileResolution.x;
+      for (var tileIndex = 0; tileIndex < tileResolution.x; tileIndex++)
+      {
+          var tileBaseIndex = rowBaseMaskIndex + tileIndex * wordsPerTile;
+          for (var i = 0; i < compactCount; i++)
+          {
+              var itemIndex = (int)itemIndices[i];
+              var wordIndex = itemIndex / 32;
+              var itemMask = 1u << (itemIndex % 32);
+              var range = itemRanges[i];
+              if (range.Contains((short)tileIndex))
+              {
+                  tileMasks[tileBaseIndex + wordIndex] |= itemMask;
+              }
+          }
+      }
+      ```
+- SetupLights: 开启Deferred+时，
+  - m_ReflectionProbeManager.UpdateGpuData： 更新反射探针的数据。
+  - 清理数据。
+  - 上传两个CBuffer `urp_ZBinBuffer`, `urp_TileBuffer`。
+    ```C#
+    using (new ProfilingScope(m_ProfilingSamplerFPUpload))
+    {
+        m_ZBinsBuffer.SetData(m_ZBins.Reinterpret<float4>(UnsafeUtility.SizeOf<uint>()));
+        m_TileMasksBuffer.SetData(m_TileMasks.Reinterpret<float4>(UnsafeUtility.SizeOf<uint>()));
+        cmd.SetGlobalConstantBuffer(m_ZBinsBuffer, "urp_ZBinBuffer", 0, UniversalRenderPipeline.maxZBinWords * 4);
+        cmd.SetGlobalConstantBuffer(m_TileMasksBuffer, "urp_TileBuffer", 0, UniversalRenderPipeline.maxTileWords * 4);
+    }
+    ``` 
+  - 上传Cluster相关的参数 `_FPParams0`, `_FPParams1`, `_FPParams2`. 
+    ```
+    _FPParams0：
+      x:
+      y:
+      z:
+      w:
+    ```
+
+### GBuffer（以 `Lit.shader`为例）: 
+- Pass "GBuffer" 使用 keyword ``
