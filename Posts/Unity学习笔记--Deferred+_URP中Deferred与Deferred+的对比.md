@@ -15,7 +15,7 @@ Deferred+，其实就是Clustered Deferred Rendering的一种实现。在URP可�
 ## Deferred vs Deferred+
 > 下文内容暂不考虑XR等多视图渲染的情况。
 ### ForwardLights 
-Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.com/Unity-Technologies/Graphics/blob/d18dd70ba6e63447b9c1f2225b2a94d56d29a644/Packages/com.unity.render-pipelines.universal/Runtime/ForwardLights.cs)的对象进行Cluster的构建。
+Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.com/Unity-Technologies/Graphics/blob/d18dd70ba6e63447b9c1f2225b2a94d56d29a644/Packages/com.unity.render-pipelines.universal/Runtime/ForwardLights.cs)的对象来进行Cluster的构建。
 - Constructor： 
   - CreateForwardPlusBuffers(): 创建两个[GraphicsBuffer](https://docs.unity3d.com/6000.1/Documentation/ScriptReference/GraphicsBuffer.html) “URP Z-Bin Buffer”和 “URP Tile Buffer”，分别用于储存Z方向， XY平面上的非平行(additional)光源和反射探针的信息，并以Cbuffer的形式上传到GPU侧。 
     > 下文中使用 **local lights** 一词表示非平行光源和反射探针。 
@@ -605,6 +605,29 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
             ``` 
             ![20250522172445](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250522172445.png)
         - 如果光源为Spot Light：
+          - 计算底面圆在YZ屏幕投影：
+            ``` C#
+            var baseRadius = math.sqrt(range * range - coneHeight * coneHeight);
+            var baseCenter = lightPositionVS + lightDirectionVS * coneHeight;
+            var baseUY = math.abs(math.abs(lightDirectionVS.x) - 1) < 1e-6f ? math.float3(0, 1, 0) : math.normalize(math.cross(lightDirectionVS, math.float3(1, 0, 0)));
+            var baseVY = math.cross(lightDirectionVS, baseUY);
+            GetProjectedCircleHorizon(baseCenter.yz, baseRadius, baseUY.yz, baseVY.yz, out var baseY1UV, out var baseY2UV);
+            var baseY1 = baseCenter + baseY1UV.x * baseUY + baseY1UV.y * baseVY;
+            var baseY2 = baseCenter + baseY2UV.x * baseUY + baseY2UV.y * baseVY;
+            if (baseY1.z >= near) ExpandY(baseY1);
+            if (baseY2.z >= near) ExpandY(baseY2);
+            ``` 
+          - 计算底面圆与近平面相交的情况： -> 主要考虑切点被剔除的情况？
+            ``` C#
+            if (GetCircleClipPoints(baseCenter, lightDirectionVS, baseRadius, near, out var baseClip0, out var baseClip1))
+            {
+                ExpandY(baseClip0);
+                ExpandY(baseClip1);
+            }
+            ``` 
+          - 计算Cone与近平面相交的情况？
+          - 计算Cone的投影？
+          - 
   - `TileRangeExpansionJob`: 将`TilingJob`中计算的结果写入`m_TileMasks`中。 遍历各个Y方向的Tile分区（遍历Tile行）
     - 遍历各个Local lights，记录该Y方向的Tile分区上，各个Local lights在X方向的Tile分区上的影响的范围（itemRanges）。（剔除在该Y方向Tile分区没影响的光源/反射探针）
       ``` C#
@@ -668,4 +691,185 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
     ```
 
 ### GBuffer（以 `Lit.shader`为例）: 
-- Pass "GBuffer" 使用 keyword ``
+- Pass "GBuffer" 使用 keyword `USE_CLUSTER_LIGHT_LOOP` 
+  - 计算 `GetMainLight`时，因为光源的可见性已经在计算Cluster时确定。后续着色计算时，不需要依赖引擎内置的 `unity_LightData.z` 判断光源是否被剔除（掩码过滤）。
+    ```C#
+    #if USE_CLUSTER_LIGHT_LOOP
+    #if defined(LIGHTMAP_ON) && defined(LIGHTMAP_SHADOW_MIXING)
+        light.distanceAttenuation = _MainLightColor.a;
+    #else
+        light.distanceAttenuation = 1.0;
+    #endif
+    #else
+        light.distanceAttenuation = unity_LightData.z; // unity_LightData.z is 1 when not culled by the culling mask, otherwise 0.
+    #endif
+    ``` 
+  - 根据反射探针计算IBL时，如果开启`USE_CLUSTER_LIGHT_LOOP`， 会遍历该像素在cluster中记录的各个reflection probe，直到权重已满0.99。 否则，只采样固定的两个默认的探针unity_SpecCube0，unity_SpecCube1。
+    ```C#
+    half3 CalculateIrradianceFromReflectionProbes(half3 reflectVector, float3 positionWS, half perceptualRoughness, float2 normalizedScreenSpaceUV)
+    {
+        half3 irradiance = half3(0.0h, 0.0h, 0.0h);
+        half mip = PerceptualRoughnessToMipmapLevel(perceptualRoughness);
+    #if USE_CLUSTER_LIGHT_LOOP && defined(_REFLECTION_PROBE_ATLAS)
+        float totalWeight = 0.0f;
+        uint probeIndex;
+        ClusterIterator it = ClusterInit(normalizedScreenSpaceUV, positionWS, 1);
+        [loop] while (ClusterNext(it, probeIndex) && totalWeight < 0.99f)
+        {
+          // ...
+          float4 scaleOffset0 = urp_ReflProbes_MipScaleOffset[probeIndex * 7 + (uint)mip0];
+          float4 scaleOffset1 = urp_ReflProbes_MipScaleOffset[probeIndex * 7 + (uint)mip1];
+
+          half3 irradiance0 = half4(SAMPLE_TEXTURE2D_LOD(urp_ReflProbes_Atlas, sampler_LinearClamp, uv * scaleOffset0.xy + scaleOffset0.zw, 0.0)).rgb;
+          half3 irradiance1 = half4(SAMPLE_TEXTURE2D_LOD(urp_ReflProbes_Atlas, sampler_LinearClamp, uv * scaleOffset1.xy + scaleOffset1.zw, 0.0)).rgb;
+          // ...
+        }
+    #else
+        // ...
+
+        // Sample the first reflection probe
+        if (weightProbe0 > 0.01f)
+        {
+          // ...
+          half4 encodedIrradiance = half4(SAMPLE_TEXTURECUBE_LOD(unity_SpecCube0, samplerunity_SpecCube0, reflectVector0, mip));
+          // ...
+        }
+
+        // Sample the second reflection probe
+        if (weightProbe1 > 0.01f)
+        {
+          // ...
+          half4 encodedIrradiance = half4(SAMPLE_TEXTURECUBE_LOD(unity_SpecCube1, samplerunity_SpecCube1, reflectVector1, mip));
+          // ...
+        }
+    #endif
+    // ...
+    }
+    ``` 
+    >反射探针的权重由像素到包围盒上所有的面的距离共同决定： 权重 = min( 像素到各面的距离 / Blend Distance, 1.0 - totalWeight或desiredWeightProbe )，当像素到面距离从0~Blend Distance时， 权重从 0~100%之间变化。 而当存在Blend Distance 超过面间距一半时，该probe不存在一个位置可以使权重到达100%。
+- DeferredLight：  
+  - PrecomputeLights: 不开启Deferred+时， Deferred管线会在CPU侧根据光源类型对additional lights进行排序，并值保留Spot，Light，Directional三种光源。
+  - ClusterDeferred和StencilDeferred: 开启Deferred+时，进行光照计算时会使用 **ClusterDeferred.shader**。 而Deferred时，使用**StencilDeferred.shader**.
+    - 顶点着色器阶段: 使用**ClusterDeferred.shader**时，使用覆盖全屏的三角形进行处理。 因为后续像素可以根据Cluster中知道有哪些光源参与着色，不用担心做了多余的着色。
+      > **StencilDeferred.shader** : 会根据光源类型使用不同的Shader变体，及绘制用的几何体。 保证该光源仅覆盖其影响的像素。 
+      Directional light影响全局，mesh使用覆盖全屏的三角形； Point Light为球体； Spot Light为半球体。
+      ``` C# 
+      internal void ExecuteDeferredPass(RasterCommandBuffer cmd, UniversalCameraData cameraData, UniversalLightData lightData, UniversalShadowData shadowData)
+      {
+        // ...
+        if (m_UseDeferredPlus)
+            RenderClusterLights(cmd, shadowData);
+        else
+            RenderStencilLights(cmd, lightData, shadowData, cameraData.renderer.stripShadowsOffVariants);
+        // ...
+      }
+
+      void RenderClusterLights(RasterCommandBuffer cmd, UniversalShadowData shadowData)
+      {
+        // ...
+        cmd.DrawMesh(m_FullscreenMesh, Matrix4x4.identity, m_ClusterDeferredMaterial, 0, m_ClusterDeferredPasses[(int)ClusterDeferredPasses.ClusteredLightsLit]);
+
+        // ...
+      }
+
+      void RenderStencilLights(RasterCommandBuffer cmd, UniversalLightData lightData, UniversalShadowData shadowData, bool stripShadowsOffVariants)
+      {
+        // ...
+        if (HasStencilLightsOfType(LightType.Directional))
+            RenderStencilDirectionalLights(cmd, stripShadowsOffVariants, lightData, shadowData, visibleLights, hasAdditionalLightPass, hasLightCookieManager, lightData.mainLightIndex);
+
+        if (lightData.supportsAdditionalLights)
+        {
+            if (HasStencilLightsOfType(LightType.Point))
+                RenderStencilPointLights(cmd, stripShadowsOffVariants, lightData, shadowData, visibleLights, hasAdditionalLightPass, hasLightCookieManager);
+
+            if (HasStencilLightsOfType(LightType.Spot))
+                RenderStencilSpotLights(cmd, stripShadowsOffVariants, lightData, shadowData, visibleLights, hasAdditionalLightPass, hasLightCookieManager);
+        }
+        // ...
+      }
+      ```
+    - 片元着色器阶段: 
+      - 光源计算顺序： 开启Deferred+时，先计算MainLight，然后是additional lights中的Spot/Point Lights，然后是additional lights中的directional light。 而在Deferred中，顺序为MianLight， additional lights中的directional light， additional lights中的Spot/Point Lights。 
+        > 注释中提到Deferred+的写法是为了避免FXC编译时的警告。 
+        ``` c#
+        // Main light
+        Light mainLight = GetMainLight();
+        mainLight.distanceAttenuation = 1.0;
+        bool materialReceiveShadowsOff = (gBufferData.materialFlags & kMaterialFlagReceiveShadowsOff) != 0;
+        // ...
+        color += DeferredLightContribution(mainLight, inputData, gBufferData);
+
+        // Additional light loop
+        // We do additional directional lights last because otherwise FXC complains...
+        uint pixelLightCount = GetAdditionalLightsCount();
+        LIGHT_LOOP_BEGIN(pixelLightCount)
+          // ...
+          // Spot/Point Lights
+          color += DeferredLightContribution(light, inputData, gBufferData);
+        LIGHT_LOOP_END
+
+        UNITY_LOOP for (uint lightIndex = 0; lightIndex < min(URP_FP_DIRECTIONAL_LIGHTS_COUNT, MAX_VISIBLE_LIGHTS); lightIndex++)
+        {
+          // ...
+          // Directional lights
+          color += DeferredLightContribution(light, inputData, gBufferData);
+        }
+        ```  
+      - 计算Spot/Point lights: 根据片元的屏幕空间，世界空间位置从Cluster中读取光源信息。
+        将 `LIGHT_LOOP_BEGIN`, `URP_FP_DIRECTIONAL_LIGHTS_COUNT`, `CLUSTER_LIGHT_LOOP_SUBTRACTIVE_LIGHT_CHECK`登定义进行转换。
+        **ClusterDeferred.shader**中关于Spot/Point lights的计算部分的代码等价于以下代码。
+        ``` C
+        uint lightIndex;
+        ClusterIterator _urp_internal_clusterIterator = ClusterInit(inputData.normalizedScreenSpaceUV, inputData.positionWS, 0);
+        [loop] while (ClusterNext(_urp_internal_clusterIterator, lightIndex)) 
+        {
+          lightIndex += ((uint)_FPParams0.w)；
+          if (_AdditionalLightsColor[lightIndex].a > 0.0h) continue;
+          Light light = GetAdditionalLight(lightIndex, inputData, gBufferData.shadowMask, aoFactor);
+
+          UNITY_BRANCH if (materialReceiveShadowsOff)
+          {
+              light.shadowAttenuation = 1.0;
+          }
+
+          color += DeferredLightContribution(light, inputData, gBufferData);
+        }
+        ```
+        - ClusterInit： 
+          - 根据屏幕UV计算对应的在TileBuffer上的位置
+            ``` C
+            uint2 tileId = uint2(normalizedScreenSpaceUV * URP_FP_TILE_SCALE);
+                state.tileOffset = tileId.y * URP_FP_TILE_COUNT_X + tileId.x;
+            #if defined(USING_STEREO_MATRICES)
+                state.tileOffset += URP_FP_TILE_COUNT * unity_StereoEyeIndex;
+            #endif
+                state.tileOffset *= URP_FP_WORDS_PER_TILE;
+            ```
+          - 计算View空间下的深度，找到对应在ZbinBuffer上的位置。zBinBaseIndex 代表所在的zbin区块的headindex，向后跳过2个element才是开始记录受影响光源的信息
+            ``` c
+            float viewZ = dot(GetViewForwardDir(), positionWS - GetCameraPositionWS());
+            uint zBinBaseIndex = (uint)((IsPerspectiveProjection() ? log2(viewZ) : viewZ) * URP_FP_ZBIN_SCALE + URP_FP_ZBIN_OFFSET);
+            // The Zbin buffer is laid out in the following manner:
+            //                          ZBin 0                                      ZBin 1
+            //  .-------------------------^------------------------. .----------------^-------
+            // | header0 | header1 | word 1 | word 2 | ... | word N | header0 | header 1 | ...
+            //                     `----------------v--------------'
+            //                            URP_FP_WORDS_PER_TILE
+            //
+            // The total length of this buffer is `4*MAX_ZBIN_VEC4S`. `zBinBaseIndex` should
+            // always point to the `header 0` of a ZBin, so we clamp it accordingly, to
+            // avoid out-of-bounds indexing of the ZBin buffer.
+            zBinBaseIndex = zBinBaseIndex * (2 + URP_FP_WORDS_PER_TILE);
+            zBinBaseIndex = min(zBinBaseIndex, 4*MAX_ZBIN_VEC4S - (2 + URP_FP_WORDS_PER_TILE));
+
+            uint zBinHeaderIndex = zBinBaseIndex + headerIndex;
+            state.zBinOffset = zBinBaseIndex + 2;
+            ``` 
+            > zBinHeaderIndex / 4 使用element格式为float4，相当于一个element中存储了四个uint。element数量是c#层申请uint native array的 1/4.
+        - ClusterNext: 
+          - 当MAX_LIGHTS_PER_TILE > 32，即光源数量大于32个时。 entityIndexNextMax的后16位记录着maxIndex，需要计算的光源的最大数量。 entityIndexNextMax的前16位则记录当前读取的wordIndex，即正在读取wordIndex个 32light。
+          - 该32个light结束渲染后，while (ClusterNext(_urp_internal_clusterIterator, lightIndex)) 会判断是否存在下一个32个light. 如果当前 entityIndexNextMax 记录的 wordIndex * 32 不大于 _urp_internal_clusterIterator.entityIndexNextMax 记录的最大light序号的话，会尝试读取下一个word的32个光源。
+- ForwardOnly: 
+  - 目前Target为ScalableLit 和 Fabric 的shadergraph 不支持Gbuffer的结构，会使用ForwardOnly. 此外Unlit的shader会走Gbuffer的渲染，但不会参与deferredLighting。其也在ForwardOnly阶段渲染。![20250321175443](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250321175443.png) -》 在延迟渲染中，GBuffer 存储了场景的几何信息（如法线、深度、材质属性等）。如果某些物体（如 Unlit 物体）不写入 GBuffer，会导致 GBuffer 中出现“空洞”（即缺失数据区域）。？？
+  这里以ComplexLit为例： 走 half4 UniversalFragmentPBR(InputData inputData, SurfaceData surfaceData)： 开启 USE_CLUSTER_LIGHT_LOOP， 先计算mainLight的LightingPhysicallyBased，再算 additional directional light， 最后算其他的additional light
