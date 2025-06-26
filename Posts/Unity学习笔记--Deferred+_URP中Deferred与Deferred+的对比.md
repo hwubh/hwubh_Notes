@@ -633,37 +633,38 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
             var coneIsClipping = near >= math.min(baseCenter.z - baseExtentZ, lightPositionVS.z) && near <= math.max(baseCenter.z + baseExtentZ, lightPositionVS.z);
             ``` 
           - 计算Cone的投影
-            - 如果与近平面相交 -> 计算交点：
+            - 如果与近平面相交. 将底面圆分别投影到XZ, YZ 平面上。构建投影形成的圆锥曲线参数方程。过光源中心做一条直线。计算该直线与圆锥曲线的两个切点。根据切点与光源中心构建直线的参数方程，计算该直线与近平面的交点，得到`p0Y/p1Y/p0X/p1X`
               ```C#
-                  var coneU = math.cross(lightDirectionVS, lightPositionVS);
-                  // The cross product will be the 0-vector if the light-direction and camera-to-light-position vectors are parallel.
-                  // In that case, {1, 0, 0} is orthogonal to the light direction and we use that instead.
-                  coneU = math.csum(coneU) != 0f ? math.normalize(coneU) : math.float3(1, 0, 0);
-                  var coneV = math.cross(lightDirectionVS, coneU);
+              var coneU = math.cross(lightDirectionVS, lightPositionVS);
+              // The cross product will be the 0-vector if the light-direction and camera-to-light-position vectors are parallel.
+              // In that case, {1, 0, 0} is orthogonal to the light direction and we use that instead.
+              coneU = math.csum(coneU) != 0f ? math.normalize(coneU) : math.float3(1, 0, 0);
+              var coneV = math.cross(lightDirectionVS, coneU);
 
-                  if (coneIsClipping)
-                  {
-                      var r = baseRadius / coneHeight;
+              if (coneIsClipping)
+              {
+                  var r = baseRadius / coneHeight;
 
-                      // Find the Y bounds of the near-plane cone intersection, i.e. where y' = 0
-                      var thetaY = FindNearConicTangentTheta(lightPositionVS.yz, lightDirectionVS.yz, r, coneU.yz, coneV.yz);
-                      var p0Y = EvaluateNearConic(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, thetaY.x);
-                      var p1Y = EvaluateNearConic(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, thetaY.y);
-                      if (ConicPointIsValid(p0Y)) ExpandY(p0Y);
-                      if (ConicPointIsValid(p1Y)) ExpandY(p1Y);
+                  // Find the Y bounds of the near-plane cone intersection, i.e. where y' = 0
+                  var thetaY = FindNearConicTangentTheta(lightPositionVS.yz, lightDirectionVS.yz, r, coneU.yz, coneV.yz); // 传入底面圆在YZ平面上的投影所对应的圆锥曲线，计算过光源位置的直线在圆锥曲线上的两个切点。 （即圆锥曲线在View空间中的Y方向上的极大，极小值）
+                  var p0Y = EvaluateNearConic(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, thetaY.x);
+                  var p1Y = EvaluateNearConic(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, thetaY.y);
+                  if (ConicPointIsValid(p0Y)) ExpandY(p0Y);
+                  if (ConicPointIsValid(p1Y)) ExpandY(p1Y);
 
-                      // Find the X bounds of the near-plane cone intersection, i.e. where x' = 0
-                      var thetaX = FindNearConicTangentTheta(lightPositionVS.xz, lightDirectionVS.xz, r, coneU.xz, coneV.xz);
-                      var p0X = EvaluateNearConic(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, thetaX.x);
-                      var p1X = EvaluateNearConic(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, thetaX.y);
-                      if (ConicPointIsValid(p0X)) ExpandY(p0X);
-                      if (ConicPointIsValid(p1X)) ExpandY(p1X);
-                  }
+                  // Find the X bounds of the near-plane cone intersection, i.e. where x' = 0
+                  var thetaX = FindNearConicTangentTheta(lightPositionVS.xz, lightDirectionVS.xz, r, coneU.xz, coneV.xz);
+                  var p0X = EvaluateNearConic(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, thetaX.x);
+                  var p1X = EvaluateNearConic(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, thetaX.y);
+                  if (ConicPointIsValid(p0X)) ExpandY(p0X);
+                  if (ConicPointIsValid(p1X)) ExpandY(p1X);
+              }
 
-                          // o, d, u and v are expected to contain {x or y, z}. I.e. pass in x values to find tangents where x' = 0
+              // o, d, u and v are expected to contain {x or y, z}. I.e. pass in x values to find tangents where x' = 0
               // Returns the two theta values as a float2.
               static float2 FindNearConicTangentTheta(float2 o, float2 d, float r, float2 u, float2 v)
               {
+                //这里求的是从光源到底面圆的投影的切线，所以只与圆锥的形状(r决定)，方向(d决定)有关。又因为希望返回的是角度值，所以跟底面的参数（u，v）有关。
                   var sqrt = math.sqrt(square(d.x) * square(u.y) + square(d.x) * square(v.y) - 2f * d.x * d.y * u.x * u.y - 2f * d.x * d.y * v.x * v.y + square(d.y) * square(u.x) + square(d.y) * square(v.x) - square(r) * square(u.x) * square(v.y) + 2f * square(r) * u.x * u.y * v.x * v.y - square(r) * square(u.y) * square(v.x)); // 等于 dXu + dXv - r^2 * (uXv)。 该值大于0时，相机在圆锥外，存在两个切点。
                   var denom = d.x * v.y - d.y * v.x - r * u.x * v.y + r * u.y * v.x;
                   return 2 * math.atan((-d.x * u.y + d.y * u.x + math.float2(1, -1) * sqrt) / denom);
@@ -675,9 +676,10 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
                   return math.float3(o.xy + h * (d.xy + r * u.xy * math.cos(theta) + r * v.xy * math.sin(theta)), near);
               }
               ```
+              ![20250626113952](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250626113952.png)
             -  计算相机到圆锥的两条切线：
               ``` C#
-                              // Calculate the lines making up the sides of the cone as seen from the camera. `l1` and `l2` form lines
+                // Calculate the lines making up the sides of the cone as seen from the camera. `l1` and `l2` form lines
                 // from the light position.
                 GetConeSideTangentPoints(lightPositionVS, lightDirectionVS, cosHalfAngle, baseRadius, coneHeight, range, coneU, coneV, out var l1, out var l2);
 
