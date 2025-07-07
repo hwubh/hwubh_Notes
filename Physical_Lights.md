@@ -31,3 +31,30 @@
 移植light unit可能的问题：
 DrawGeneralContentInternal
 DrawSpotShapeContent
+
+------------
+## Exposure Value(EV): 
+- def: numerical camera settings of shutter speed and f/stop
+- Physical meaning: Light level. 
+  - EV值越高 → 光线越强 → 所需曝光量越少。
+  - EV是绝对数值（如EV 12），但需结合ISO解读（ISO 100下的EV 12 ≠ ISO 200下的EV 12）
+    > URP中EV默认为EV100， 即 ISO 100的情况。
+    > EV100 15 = EV200 15 -> 这里的相对说明二者的进光量相同。
+
+- exposure triangle: three factors affect EV
+  - **aperture**: The size of the opening in the lens that allows light to pass through. wider -> shallow depth of field (blurry background).
+  - **shutter speed**: The length of time the camera's shutter remains open, exposing the sensor to light. fast ->freezes motion
+  - **ISO**: The sensitivity of the camera's sensor to light. lower -> ideal for bright conditions, produces less noise
+
+- Relative EV(compensation?):  is the amount of change from the current exposure, like perhaps +1 EV more.
+  - **One EV** is a step of **one stop**(±1 EV) compensation value (could be aperture, shutter speed, or ISO, or some combination)
+    - Plus or minus half or double Shutter Speed duration is ± 1 EV
+    - Plus or minus half or double ISO value is ± 1 EV
+    - Plus or minus $\sqrt{2}$ on f/stop is ± 1 EV: e.g.: f/8 —除以$\sqrt{2}$-> f/5.6 —除以$\sqrt{2}$-> f/4 
+
+- reference: 
+  - https://www.scantips.com/lights/evchart.html#chart
+
+-----------
+## EV in HDRP：
+- Fixed: 在一帧的开始处进行处理（因为不需要依赖上一帧的数据）。 -》 DoFixedExposure -> 调用compute shader kernel `KFixedExposure`， 将计算得到的exposure值写入Texture `_ExposureTexture`(hdCamera.currentExposureTextures.current``)中。 
