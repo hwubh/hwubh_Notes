@@ -633,7 +633,7 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
             var coneIsClipping = near >= math.min(baseCenter.z - baseExtentZ, lightPositionVS.z) && near <= math.max(baseCenter.z + baseExtentZ, lightPositionVS.z);
             ``` 
           - 计算Cone的投影
-            - 如果与近平面相交. 将底面圆分别投影到XZ, YZ 平面上。构建投影形成的圆锥曲线参数方程。过光源中心做一条直线。计算该直线与圆锥曲线的两个切点。根据切点与光源中心构建直线的参数方程，计算该直线与近平面的交点，得到`p0Y/p1Y/p0X/p1X`
+            - 如果与近平面相交. 将底面圆分别投影到XZ, YZ 平面上。构建投影形成的圆锥曲线参数方程。过光源中心做一条直线。计算该直线与圆锥曲线的两个切点。根据切点的坐标和相似三角形，计算该直线与近平面的交点，得到`p0Y/p1Y/p0X/p1X`
               ```C#
               var coneU = math.cross(lightDirectionVS, lightPositionVS);
               // The cross product will be the 0-vector if the light-direction and camera-to-light-position vectors are parallel.
@@ -647,8 +647,8 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
 
                   // Find the Y bounds of the near-plane cone intersection, i.e. where y' = 0
                   var thetaY = FindNearConicTangentTheta(lightPositionVS.yz, lightDirectionVS.yz, r, coneU.yz, coneV.yz); // 传入底面圆在YZ平面上的投影所对应的圆锥曲线，计算过光源位置的直线在圆锥曲线上的两个切点。 （即圆锥曲线在View空间中的Y方向上的极大，极小值）
-                  var p0Y = EvaluateNearConic(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, thetaY.x);
-                  var p1Y = EvaluateNearConic(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, thetaY.y);
+                  var p0Y = EvaluateNearConic(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, thetaY.x); 
+                  var p1Y = EvaluateNearConic(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, thetaY.y); // p0Y,p1Y即切点沿切线在近平面上的投影（交点）。
                   if (ConicPointIsValid(p0Y)) ExpandY(p0Y);
                   if (ConicPointIsValid(p1Y)) ExpandY(p1Y);
 
@@ -672,11 +672,12 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
 
               static float3 EvaluateNearConic(float near, float3 o, float3 d, float r, float3 u, float3 v, float theta)
               {
-                  var h = (near - o.z) / (d.z + r * u.z * math.cos(theta) + r * v.z * math.sin(theta)); // 放大的系数。
+                  //根据相似三角形得到交点的坐标。
+                  var h = (near - o.z) / (d.z + r * u.z * math.cos(theta) + r * v.z * math.sin(theta)); 
                   return math.float3(o.xy + h * (d.xy + r * u.xy * math.cos(theta) + r * v.xy * math.sin(theta)), near);
               }
               ```
-              ![20250626113952](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250626113952.png)
+              ![20250626114835](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250626114835.png)
             -  计算相机到圆锥的两条切线：
               ``` C#
                 // Calculate the lines making up the sides of the cone as seen from the camera. `l1` and `l2` form lines

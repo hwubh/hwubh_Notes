@@ -25,3 +25,9 @@
 - HDRP Lights
   - Directional Lights: 
     - Shape: Angular Diameter -> 视直径 -> 真实世界的太阳并非完美的点光源，而是具有可见的视直径（约0.53度）。Angular Diameter通过控制光线从不同角度投射，在阴影边缘生成半影区（Penumbra）。 -> impact on the size of specular highlights, and the softness of baked, ray-traced, and PCSS shadows.
+
+
+-----------
+移植light unit可能的问题：
+DrawGeneralContentInternal
+DrawSpotShapeContent
