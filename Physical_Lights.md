@@ -57,4 +57,8 @@ DrawSpotShapeContent
 
 -----------
 ## EV in HDRP：
-- Fixed: 在一帧的开始处进行处理（因为不需要依赖上一帧的数据）。 -》 DoFixedExposure -> 调用compute shader kernel `KFixedExposure`， 将计算得到的exposure值写入Texture `_ExposureTexture`(hdCamera.currentExposureTextures.current``)中。 
+- Fixed: 在一帧的开始处进行处理（因为不需要依赖上一帧的数据）。 -》 DoFixedExposure -> 调用compute shader kernel `KFixedExposure`， 将计算得到的exposure值写入size 为 1*1 的 Texture `_ExposureTexture`(hdCamera.currentExposureTextures.current``)中。  -> 在物体的着色计算阶段(Forward)/Gbuffer阶段读取。
+- dynamic: 在后处理阶段进行处理。 结果用于下一帧的渲染。 同样最后写入size 为 1*1 的 Texture `_ExposureTexture`(hdCamera.currentExposureTextures.current``)中。
+  - DoDynamicExposure： 应该三个pass，两个kernel `KPrePass`, `KReduction`
+    - 1st pass: `KPrePass`: 在一张10249*1024的贴图上
+  - DoHistogramBasedExposure
