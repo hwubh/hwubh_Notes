@@ -32,6 +32,8 @@
 DrawGeneralContentInternal
 DrawSpotShapeContent
 
+要考虑Fixed时，因为exposure值调整时，导致的上一帧贴图的缺失？resetPostProcessingHistory。
+dynamic的情况需要考虑是否开启了后处理
 ------------
 ## Exposure Value(EV): 
 - def: numerical camera settings of shutter speed and f/stop
@@ -60,5 +62,15 @@ DrawSpotShapeContent
 - Fixed: 在一帧的开始处进行处理（因为不需要依赖上一帧的数据）。 -》 DoFixedExposure -> 调用compute shader kernel `KFixedExposure`， 将计算得到的exposure值写入size 为 1*1 的 Texture `_ExposureTexture`(hdCamera.currentExposureTextures.current``)中。  -> 在物体的着色计算阶段(Forward)/Gbuffer阶段读取。
 - dynamic: 在后处理阶段进行处理。 结果用于下一帧的渲染。 同样最后写入size 为 1*1 的 Texture `_ExposureTexture`(hdCamera.currentExposureTextures.current``)中。
   - DoDynamicExposure： 应该三个pass，两个kernel `KPrePass`, `KReduction`
-    - 1st pass: `KPrePass`: 在一张10249*1024的贴图上
-  - DoHistogramBasedExposure
+    - 1st pass: `KPrePass`: 采样color attachement，得到其luminance。 然后将luminance转对数空间的EV100值。记录在一张1024*1024的贴图上。
+      > luminance to EV100 formula： $EV_100 = log_2(\frac{L*S}{K})$. 其中L为传入的luminance值，S为ISO（这里默认为100），K为测光表校准常数（通常12.5或14）。
+    - 2nd pass: `KReduction`： 采样1st pass输出的1024* 1024贴图上进行 1022*1022次采样。其中每个线程负责2 *2个像素组成的块，每个线程组有16个线程，负责 32 *32个像素组成的块。 一共存在32 *32个线程组。 -> 对各个线程组进行递归循环，累加该线程组内的所有luminance，得到这32 *32个像素组成的加权平均luminance。 -> 将结果记录到一张32 *32 的`_OutputTexture`。
+    - 3rd pass: `KReduction`：与2nd pass类似，结果记录到一张1 *1的`_OutputTexture`。
+    - 其中Kernel `KReduction`: 存在三种模式：
+      - Automatic： 对计算的结果应用曝光补偿(`ParamExposureCompensation`)。 并根据上一帧的曝光值，限制二者之间的变化量，防止跳变。 最后对曝光结果进行clamp处理。
+      - Curve Remapping: 使用自定义曲线转换亮度到曝光值，取得不同的美术效果。 -> 
+        - 低亮度区域 -> 陡峭曲线 (增强暗部细节)
+        - 中亮度区域 -> 线性响应
+        - 高亮度区域 -> 平缓曲线 (保护高光)
+  - DoHistogramBasedExposure: 
+    - 
