@@ -28,3 +28,5 @@
     - 优劣：可以灵活调整金属，非金属的$F_0$，也容易制作出违反物理定律的贴图；使用了两张RGB图。
 - 14: Shadow pancaking: unity 会调整（前提）光源相机的近平面来优化阴影质量，但这也可能造成错误的阴影显示。
 - 15： Native Renderpass -> 底层原理即Vulkan那一套RenderPass/subpass
+- 16: TEXTURE2D_X 在开启XR,VR 的情况下，会被解释为TEXTURE2D_ARRAY，而不是TEXTURE2D。 使用 _BlitTexture等内置的贴图，需要注意。 #USE_TEXTURE2D_X_AS_ARRAY #BLIT_SINGLE_SLICE -> 比如 TEXTURE2D_ARGS不能用于传递'Texture2DArray<float4>' ，而 URP内部并不会针对XR环境重新定义TEXTURE2D_ARGS
+    > TEXTURE2D_X,  TEXTURE2D_X_ARGS 等： 中的 “_X” 应该为支持XR的含义？
