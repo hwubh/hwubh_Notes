@@ -4,9 +4,11 @@ using System.Linq.Expressions;
 using TMPro;
 using Unity.Mathematics;
 using UnityEditor.Experimental.GraphView;
+using UnityEditor.Rendering.LookDev;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.UIElements;
+using static TMPro.SpriteAssetUtilities.TexturePacker_JsonArray;
 using static UnityEngine.UI.Image;
 
 [ExecuteInEditMode]
@@ -212,6 +214,50 @@ public class AABB : MonoBehaviour
         return 2 * math.atan((-d.x * u.y + d.y * u.x + math.float2(1, -1) * sqrt) / denom);
     }
 
+    static void GetConeSideTangentPoints(float3 vertex, float3 axis, float cosHalfAngle, float circleRadius, float coneHeight, float range, float3 circleU, float3 circleV, out float3 l1, out float3 l2)
+    {
+        l1 = l2 = 0;
+
+        if (math.dot(math.normalize(-vertex), axis) >= cosHalfAngle)
+        {
+            return;
+        }
+
+        var d = -math.dot(vertex, axis);
+        // If d is zero, this leads to a numerical instability in the code later on. This is why we make the value
+        // an epsilon if it is zero.
+        if (d == 0f) d = 1e-6f;
+        var sign = d < 0 ? -1f : 1f;
+        // sign *= vertex.z < 0 ? -1f : 1f;
+        // `origin` is the center of the circular slice we're about to calculate at distance `d` from the `vertex`.
+        var origin = vertex + axis * d;
+        // Get the radius of the circular slice of the cone at the `origin`.
+        var radius = math.abs(d) * circleRadius / coneHeight;
+        DrawCircle(origin, radius, Color.pink, Panel.XY, axis);
+        // `circleU` and `circleV` are the two vectors perpendicular to the cone's axis. `cameraUV` is thus the
+        // position of the camera projected onto the plane of the circular slice. This basically creates a new
+        // 2D coordinate space, with (0, 0) located at the center of the circular slice, which why this variable
+        // is called `origin`.
+        var cameraUV = math.float2(math.dot(circleU, -origin), math.dot(circleV, -origin));
+        // Use homogeneous coordinates to find the tangents.
+        var polar = math.float3(cameraUV, -square(radius));
+        var p1 = math.float2(-1, -polar.x / polar.y * (-1) - polar.z / polar.y);
+        var p2 = math.float2(1, -polar.x / polar.y * 1 - polar.z / polar.y);
+        //Debug.DrawLine(Vector3.zero, p1, Color.black);
+        //Debug.DrawLine(Vector3.zero, p2, Color.black);
+        var lineDirection = math.normalize(p2 - p1);
+        var lineNormal = math.float2(lineDirection.y, -lineDirection.x);
+        var distToLine = math.dot(p1, lineNormal);
+        var lineCenter = lineNormal * distToLine;
+        var l = math.sqrt(radius * radius - distToLine * distToLine);
+        var x1UV = lineCenter + l * lineDirection;
+        var x2UV = lineCenter - l * lineDirection;
+        var dir1 = math.normalize((origin + x1UV.x * circleU + x1UV.y * circleV) - vertex) * sign;
+        var dir2 = math.normalize((origin + x2UV.x * circleU + x2UV.y * circleV) - vertex) * sign;
+        l1 = dir1 * range;
+        l2 = dir2 * range;
+    }
+
     public void Pers() 
     {
         var lightOrigin = new Vector3(0, 0, depth);
@@ -225,14 +271,11 @@ public class AABB : MonoBehaviour
         var height = 8f;
         var origin = lightOrigin + ray * height;
         Debug.DrawLine(lightOrigin, origin, Color.red);
+        Debug.DrawLine(Vector3.zero, lightOrigin, Color.red);
         DrawCircle(origin, radius, Color.blue, Panel.XY, ray);
-        Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(radius, 0, 0), Color.blue);
-        Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(-radius, 0, 0), Color.blue);
-        Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(0, radius, 0), Color.blue);
-        Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(0, -radius, 0), Color.blue);
 
         var cameraPosWS = Vector3.zero;
-        var near = 5f;
+        var near = 4f;
         var rangesq = square(range);
         var sphereClipRadius = math.sqrt(rangesq - square(near - lightOrigin.z));
 
@@ -242,27 +285,39 @@ public class AABB : MonoBehaviour
         var baseRadius = math.sqrt(range * range - height * height);
         var baseCenter = lightOrigin + ray * height;
 
+        var halfAngle = math.atan(radius / height) * 0.5f;
+        var cosHalfAngle = math.cos(halfAngle);
+
         // Calculate Z bounds of cone and check if it's overlapping with the near plane.
         // From https://www.iquilezles.org/www/articles/diskbbox/diskbbox.htm
         var baseExtentZ = baseRadius * math.sqrt(1.0f - square(rayValue.z));
         var coneIsClipping = near >= math.min(baseCenter.z - baseExtentZ, lightOrigin.z) && near <= math.max(baseCenter.z + baseExtentZ, lightOrigin.z);
 
-        var coneU = math.cross(rayValue, lightOrigin);
+        var coneU = math.normalize(math.cross(rayValue, lightOrigin));
         // The cross product will be the 0-vector if the light-direction and camera-to-light-position vectors are parallel.
         // In that case, {1, 0, 0} is orthogonal to the light direction and we use that instead.
-        coneU = math.csum(coneU) != 0f ? math.normalize(coneU) : math.float3(1, 0, 0);
+        coneU = math.normalize(coneU); // math.csum(coneU) != 0f ? math.normalize(coneU) : math.float3(1, 0, 0);
         var coneV = math.cross(rayValue, coneU);
+        Debug.DrawLine(origin, origin + new Vector3(coneU.x, coneU.y, coneU.z) * radius, Color.white);
+        Debug.DrawLine(origin, origin + new Vector3(coneV.x, coneV.y, coneV.z) * radius, Color.white);
+        Debug.DrawLine(lightOrigin, origin + new Vector3(coneU.x, coneU.y, coneU.z) * radius, Color.blue);
+        Debug.DrawLine(lightOrigin, origin + new Vector3(coneV.x, coneV.y, coneV.z) * radius, Color.blue);
+        Debug.DrawLine(lightOrigin, origin - new Vector3(coneU.x, coneU.y, coneU.z) * radius, Color.blue);
+        Debug.DrawLine(lightOrigin, origin - new Vector3(coneV.x, coneV.y, coneV.z) * radius, Color.blue);
 
-        if (coneIsClipping)
+        // Calculate the lines making up the sides of the cone as seen from the camera. `l1` and `l2` form lines
+        // from the light position.
+        GetConeSideTangentPoints(lightOrigin, ray, cosHalfAngle, baseRadius, height, range, coneU, coneV, out var l1, out var l2);
+
+        Debug.DrawLine(lightOrigin, l1, Color.yellow);
+        Debug.DrawLine(lightOrigin, l2, Color.yellow);
+
+        if ((l1.x != 0.0f) && (l1.y != 0.0f) && (l1.z != 0.0f))
         {
-            var r = baseRadius / height;
-
-            // Find the Y bounds of the near-plane cone intersection, i.e. where y' = 0
-            var thetaY = FindNearConicTangentTheta( new float2(lightOrigin.y, lightOrigin.z), rayValue.yz, r, coneU.yz, coneV.yz);
-            var p0Y = EvaluateNearConic(near, lightOrigin, rayValue, r, coneU, coneV, thetaY.x);
-            var p1Y = EvaluateNearConic(near, lightOrigin, rayValue, r, coneU, coneV, thetaY.y);
-            Debug.DrawLine(cameraPosWS, p0Y, Color.yellow);
-            Debug.DrawLine(cameraPosWS, p1Y, Color.yellow);
+            var planeNormal = math.float3(0, 1, near);
+            var l1t = math.dot(-lightOrigin, planeNormal) / math.dot(l1, planeNormal);
+            Vector3 l1x = lightOrigin + new Vector3(l1.x, l1.y, l1.z) * l1t;
+            Debug.DrawLine(lightOrigin, l1x, Color.black);
         }
     }
 
@@ -716,6 +771,75 @@ public class AABB : MonoBehaviour
             Debug.DrawLine(cameraPosWS, baseClip0, Color.red);
             Debug.DrawLine(cameraPosWS, baseClip1, Color.red);
         }
+    }
+
+    public void Pers_Spot_Cone_Clipping() 
+    {
+        var lightOrigin = new Vector3(0, 0, depth);
+        var range = 10f;
+        var ray = new Vector3(1f, 1f, angle).normalized;
+        var orientation = Quaternion.FromToRotation(Vector3.back, ray);
+        float3 rayValue = new float3(ray);
+        //DrawCircle(lightOrigin, range, Color.yellow, Panel.ZY, Vector3.forward);
+
+        var radius = 6f;
+        var height = 8f;
+        var origin = lightOrigin + ray * height;
+        Debug.DrawLine(lightOrigin, origin, Color.red);
+        DrawCircle(origin, radius, Color.blue, Panel.XY, ray);
+
+        var cameraPosWS = Vector3.zero;
+        var near = 4f;
+        var rangesq = square(range);
+        var sphereClipRadius = math.sqrt(rangesq - square(near - lightOrigin.z));
+
+        var baseUY = math.abs(math.abs(rayValue.x) - 1) < 1e-6f ? math.float3(0, 1, 0) : math.normalize(math.cross(rayValue, math.float3(1, 0, 0)));
+        var baseVY = math.cross(rayValue, baseUY);
+
+        var baseRadius = math.sqrt(range * range - height * height);
+        var baseCenter = lightOrigin + ray * height;
+
+        // Calculate Z bounds of cone and check if it's overlapping with the near plane.
+        // From https://www.iquilezles.org/www/articles/diskbbox/diskbbox.htm
+        var baseExtentZ = baseRadius * math.sqrt(1.0f - square(rayValue.z));
+        var coneIsClipping = near >= math.min(baseCenter.z - baseExtentZ, lightOrigin.z) && near <= math.max(baseCenter.z + baseExtentZ, lightOrigin.z);
+
+        var coneU = math.normalize(math.cross(rayValue, lightOrigin));
+        // The cross product will be the 0-vector if the light-direction and camera-to-light-position vectors are parallel.
+        // In that case, {1, 0, 0} is orthogonal to the light direction and we use that instead.
+        coneU = math.normalize(coneU); // math.csum(coneU) != 0f ? math.normalize(coneU) : math.float3(1, 0, 0);
+        var coneV = math.cross(rayValue, coneU);
+
+        Debug.DrawLine(origin, origin + new Vector3(coneU.x, coneU.y, coneU.z) * radius, Color.white);
+        Debug.DrawLine(origin, origin + new Vector3(coneV.x, coneV.y, coneV.z) * radius, Color.white);
+
+        Debug.DrawLine(lightOrigin, origin + new Vector3(coneU.x, coneU.y, coneU.z) * radius, Color.blue);
+        Debug.DrawLine(lightOrigin, origin + new Vector3(coneV.x, coneV.y, coneV.z) * radius, Color.blue);
+        Debug.DrawLine(lightOrigin, origin - new Vector3(coneU.x, coneU.y, coneU.z) * radius, Color.blue);
+        Debug.DrawLine(lightOrigin, origin - new Vector3(coneV.x, coneV.y, coneV.z) * radius, Color.blue);
+
+        if (coneIsClipping)
+        {
+            var r = baseRadius / height;
+
+            // Find the Y bounds of the near-plane cone intersection, i.e. where y' = 0
+            var thetaY = FindNearConicTangentTheta(new float2(lightOrigin.y, lightOrigin.z), rayValue.yz, r, coneU.yz, coneV.yz);
+            //var p0Y = EvaluateNearConic(near, lightOrigin, rayValue, r, coneU, coneV, thetaY.x);
+            var p1Y = EvaluateNearConic(near, lightOrigin, rayValue, r, coneU, coneV, thetaY.y);
+            //Debug.DrawLine(lightOrigin, p0Y, Color.yellow);
+            Debug.DrawLine(lightOrigin, p1Y, Color.yellow);
+
+            var h = coneU * math.cos(thetaY.y) + coneV * math.sin(thetaY.y);
+            var z = EvaluateNearConic(origin.z + h.z * radius, lightOrigin, rayValue, r, coneU, coneV, thetaY.y);
+            Debug.DrawLine(origin, origin + new Vector3(h.x, h.y, h.z) * radius, Color.black);
+            Debug.DrawLine(lightOrigin, z, Color.yellow);
+            h = coneU * math.cos(thetaY.x) + coneV * math.sin(thetaY.x);
+            z = EvaluateNearConic(origin.z + h.z * radius, lightOrigin, rayValue, r, coneU, coneV, thetaY.x);
+            Debug.DrawLine(origin, origin + new Vector3(h.x, h.y, h.z) * radius, Color.black);
+            Debug.DrawLine(lightOrigin, z, Color.yellow);
+        }
+
+        Debug.DrawLine(new Vector3(0, 100, near), new Vector3(0, -100, near), Color.green);
     }
 
     /// <summary>
