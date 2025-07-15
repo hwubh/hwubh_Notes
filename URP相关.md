@@ -11,7 +11,7 @@
 - 9：URP 中，unity内存的cbuffer就占据了7个动态的标识符（非Instancing 的少一个），对于一些maxDescriptorSetUniformBuffersDynamic 为 8 芯片（如Andreno 512以下）的机型，Shader只可以自己定义1~2Cbuffer, 否则（不改动源码的情况下）该shader会被直接抛弃。
 - 10：The light map UV are provided via the second texture coordinates channel so we need to use the TEXCOORD1 semantic in Attributes.
 - 11：URP14中cmd.blit 在msaa未开启的情况下获取的maintex为黑；若使用Blitter.BlitCameraTexture需要将maintex改成blitTexture，且必须包含“Runtime/Utilities/Blit.hlsl”，且需要重映射一下顶点和uv。![20240611005239](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240611005239.png)
-- 12：URP的PBR渲染方程：https://blog.csdn.net/linjf520/article/details/122464903
+- 12：URP的PBR渲染方程：https://blog.csdn.net/linjf520/article/details/122464903 https://zhuanlan.zhihu.com/p/638157345
   - D：GGX： 描述微表面法线N和半角H同向性的比重，粗糙度越高，物体表面越粗糙，N，H同向性越低（反射越不清晰）：![20240614092732](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240614092732.png)
   - G：k:NdotL的过去系数：k = pow(1+roughness,2)*0.5, 粗糙度越高，G值越小![20240614092948](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240614092948.png)
   - F：光线不同角度入射会有不同反射率：非金属的反射率多在：0.02~0.04；金属的反射率多在：0.7~1.0；金属度越高，F值越大（Lerp = （0.04，albedo，metallic））![20240614094220](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240614094220.png)

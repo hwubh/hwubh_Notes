@@ -25,6 +25,14 @@
 - HDRP Lights
   - Directional Lights: 
     - Shape: Angular Diameter -> 视直径 -> 真实世界的太阳并非完美的点光源，而是具有可见的视直径（约0.53度）。Angular Diameter通过控制光线从不同角度投射，在阴影边缘生成半影区（Penumbra）。 -> impact on the size of specular highlights, and the softness of baked, ray-traced, and PCSS shadows.
+  - Spot lights:
+    - Reflector: 用于模拟带有**反射碗**的spot光源(如舞台灯，车灯等)。 开启该选项会使设定的所有Intensity都投向Cone的范围内，而不会有超出Cone范围而浪费的Intensity。（将向后散射的光线重定向到聚光灯主方向）
+
+- HDRP Light Color:
+  - 从visibleLight.finalColor获取，该值应该是在native层计算的结果？
+  - lightData数据整体通过四个SSBO传递到shader侧。 其中每个SSBO包含的光源类型不相同。
+    > `directionalLightData`: Directional Light; `lightData`: punctual light, area light; `envLightData`: env light; `decalData` -> decal light
+  - lightData数据在 `HDGpuLightsBuilder` 这个job中进行构建。
 
 
 -----------
