@@ -29,11 +29,16 @@
     - Reflector: 用于模拟带有**反射碗**的spot光源(如舞台灯，车灯等)。 开启该选项会使设定的所有Intensity都投向Cone的范围内，而不会有超出Cone范围而浪费的Intensity。（将向后散射的光线重定向到聚光灯主方向）
 
 - HDRP Light Color:
-  - 从visibleLight.finalColor获取，该值应该是在native层计算的结果？
+  - 从visibleLight.finalColor获取，该值应该是在native层计算的结果？ -> PrecalcLightColor: Correlated Color Temperature  * colorFilter * internsity = finalColor
   - lightData数据整体通过四个SSBO传递到shader侧。 其中每个SSBO包含的光源类型不相同。
     > `directionalLightData`: Directional Light; `lightData`: punctual light, area light; `envLightData`: env light; `decalData` -> decal light
   - lightData数据在 `HDGpuLightsBuilder` 这个job中进行构建。
 
+-----------
+一些没用到的代码： 
+- directionalIntensity
+- LightUtils.ConvertLightIntensity(m_LightUnit, value, this, light);
+- DrawEmissionAdditionalContent: // Display reflector only when showing additional properties.      
 
 -----------
 移植light unit可能的问题：
