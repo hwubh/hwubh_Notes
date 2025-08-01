@@ -218,7 +218,7 @@ public class AABB : MonoBehaviour
     {
         l1 = l2 = 0;
 
-        if (math.dot(math.normalize(-vertex), axis) >= cosHalfAngle)
+        if (math.dot(math.normalize(-vertex), axis) >= cosHalfAngle) //圆锥底面的投影包含了相机？
         {
             return;
         }
@@ -233,7 +233,8 @@ public class AABB : MonoBehaviour
         var origin = vertex + axis * d;
         // Get the radius of the circular slice of the cone at the `origin`.
         var radius = math.abs(d) * circleRadius / coneHeight;
-        DrawCircle(origin, radius, Color.pink, Panel.XY, axis);
+        DrawCircle(origin, radius, Color.blue, Panel.XY, axis);
+        //DrawCircle(origin, radius, Color.pink, Panel.XY, axis);
         // `circleU` and `circleV` are the two vectors perpendicular to the cone's axis. `cameraUV` is thus the
         // position of the camera projected onto the plane of the circular slice. This basically creates a new
         // 2D coordinate space, with (0, 0) located at the center of the circular slice, which why this variable
@@ -243,8 +244,9 @@ public class AABB : MonoBehaviour
         var polar = math.float3(cameraUV, -square(radius));
         var p1 = math.float2(-1, -polar.x / polar.y * (-1) - polar.z / polar.y);
         var p2 = math.float2(1, -polar.x / polar.y * 1 - polar.z / polar.y);
-        //Debug.DrawLine(Vector3.zero, p1, Color.black);
-        //Debug.DrawLine(Vector3.zero, p2, Color.black);
+        Debug.DrawLine(origin, origin + cameraUV.x * circleU + cameraUV.y * circleV, Color.black);
+        Debug.DrawLine(origin, origin + p1.x * circleU + p1.y * circleV, Color.yellow);
+        Debug.DrawLine(origin, origin + p2.x * circleU + p2.y * circleV, Color.yellow);
         var lineDirection = math.normalize(p2 - p1);
         var lineNormal = math.float2(lineDirection.y, -lineDirection.x);
         var distToLine = math.dot(p1, lineNormal);
@@ -252,15 +254,22 @@ public class AABB : MonoBehaviour
         var l = math.sqrt(radius * radius - distToLine * distToLine);
         var x1UV = lineCenter + l * lineDirection;
         var x2UV = lineCenter - l * lineDirection;
+        Debug.DrawLine(origin, origin + x1UV.x * circleU + x1UV.y * circleV, Color.pink);
+        Debug.DrawLine(origin, origin + x2UV.x * circleU + x2UV.y * circleV, Color.pink);
+        Debug.DrawLine(origin, origin + x1UV.x * circleU + x1UV.y * circleV, Color.pink);
+        Debug.DrawLine(origin, origin + x2UV.x * circleU + x2UV.y * circleV, Color.pink);
         var dir1 = math.normalize((origin + x1UV.x * circleU + x1UV.y * circleV) - vertex) * sign;
         var dir2 = math.normalize((origin + x2UV.x * circleU + x2UV.y * circleV) - vertex) * sign;
         l1 = dir1 * range;
         l2 = dir2 * range;
+
+        Debug.DrawLine(vertex, vertex + l1, Color.pink);
+        Debug.DrawLine(vertex, vertex + l2, Color.pink);
     }
 
     public void Pers() 
     {
-        var lightOrigin = new Vector3(0, 0, depth);
+        var lightOrigin = new Vector3(2, 2, depth);
         var range = 10f;
         var ray = new Vector3(1f, 1f, angle).normalized;
         var orientation = Quaternion.FromToRotation(Vector3.back, ray);
@@ -300,24 +309,25 @@ public class AABB : MonoBehaviour
         var coneV = math.cross(rayValue, coneU);
         Debug.DrawLine(origin, origin + new Vector3(coneU.x, coneU.y, coneU.z) * radius, Color.white);
         Debug.DrawLine(origin, origin + new Vector3(coneV.x, coneV.y, coneV.z) * radius, Color.white);
-        Debug.DrawLine(lightOrigin, origin + new Vector3(coneU.x, coneU.y, coneU.z) * radius, Color.blue);
-        Debug.DrawLine(lightOrigin, origin + new Vector3(coneV.x, coneV.y, coneV.z) * radius, Color.blue);
-        Debug.DrawLine(lightOrigin, origin - new Vector3(coneU.x, coneU.y, coneU.z) * radius, Color.blue);
-        Debug.DrawLine(lightOrigin, origin - new Vector3(coneV.x, coneV.y, coneV.z) * radius, Color.blue);
+        //Debug.DrawLine(lightOrigin, origin + new Vector3(coneU.x, coneU.y, coneU.z) * radius, Color.blue);
+        //Debug.DrawLine(lightOrigin, origin + new Vector3(coneV.x, coneV.y, coneV.z) * radius, Color.blue);
+        //Debug.DrawLine(lightOrigin, origin - new Vector3(coneU.x, coneU.y, coneU.z) * radius, Color.blue);
+        //Debug.DrawLine(lightOrigin, origin - new Vector3(coneV.x, coneV.y, coneV.z) * radius, Color.blue);
 
         // Calculate the lines making up the sides of the cone as seen from the camera. `l1` and `l2` form lines
         // from the light position.
         GetConeSideTangentPoints(lightOrigin, ray, cosHalfAngle, baseRadius, height, range, coneU, coneV, out var l1, out var l2);
 
-        Debug.DrawLine(lightOrigin, l1, Color.yellow);
-        Debug.DrawLine(lightOrigin, l2, Color.yellow);
+        //Debug.DrawLine(Vector3.zero, lightOrigin + new Vector3(l1.x, l1.y, l1.z), Color.yellow);
+        //Debug.DrawLine(lightOrigin, lightOrigin + new Vector3(l2.x, l2.y, l2.z), Color.yellow);
 
         if ((l1.x != 0.0f) && (l1.y != 0.0f) && (l1.z != 0.0f))
         {
-            var planeNormal = math.float3(0, 1, near);
+            var planeNormal = math.float3(0, 1, -0.75f);
+            //Debug.DrawLine(lightOrigin, lightOrigin + new Vector3(planeNormal.x, planeNormal.y, planeNormal.z), Color.pink);
             var l1t = math.dot(-lightOrigin, planeNormal) / math.dot(l1, planeNormal);
             Vector3 l1x = lightOrigin + new Vector3(l1.x, l1.y, l1.z) * l1t;
-            Debug.DrawLine(lightOrigin, l1x, Color.black);
+            //Debug.DrawLine(lightOrigin, l1x, Color.black);
         }
     }
 
@@ -902,7 +912,7 @@ public class AABB : MonoBehaviour
             // Convert index to x, y, and z in [-1, 1]
             var x = ((i << 1) & 2) - 1;
             var y = (i & 2) - 1;
-            vertex[i] = new Vector3(x * 3, y * 3, 4);
+            vertex[i] = new Vector3(x * 3, y * 3, 1);
         }
         Debug.DrawLine(vertex[0], vertex[1], Color.green);
         Debug.DrawLine(vertex[1], vertex[3], Color.green);
