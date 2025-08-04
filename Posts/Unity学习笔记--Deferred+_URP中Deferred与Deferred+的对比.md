@@ -678,79 +678,75 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
               }
               ```
               ![20250626114835](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250626114835.png)
-            -  计算圆锥在Y方向上的上下界：
-               -  计算线段l1, l2：
-                  ``` C#
-                  // 计算相机到圆锥上两个切点。
-                  // `l1` and `l2` 为从光源位置出发，经相机到圆锥的切点，到底面圆上的两条线段。
-                  GetConeSideTangentPoints(lightOrigin, ray, cosHalfAngle, baseRadius, height, range, coneU, coneV, out var l1, out var l2);
+            - 计算圆锥是否与视锥体Y方向上下界相交：
+              - 计算线段l1, l2：
+                ``` C#
+                // 计算相机到圆锥上两个切点。
+                // `l1` and `l2` 为从光源位置出发，经相机到圆锥的切点，到底面圆上的两条线段。
+                GetConeSideTangentPoints(lightOrigin, ray, cosHalfAngle, baseRadius, height, range, coneU, coneV, out var l1, out var l2);
 
-                  static void GetConeSideTangentPoints(float3 vertex, float3 axis, float cosHalfAngle, float circleRadius, float coneHeight, float range, float3 circleU, float3 circleV, out float3 l1, out float3 l2)
-                  {
-                      l1 = l2 = 0;
-                      // 计算相机到光源的线段与光源方向形成的夹角。
-                      // 如果夹角小于圆锥的半角，说明圆锥在XY方向的投影包含了相机。故相机到圆锥上的切线，不进行后续计算。
-                      if (math.dot(math.normalize(-vertex), axis) >= cosHalfAngle)
-                      {
-                          return;
-                      }
-
-                      var d = -math.dot(vertex, axis); // 相机在光源方向的投影长度。 =》 确定切点所在的平面。 （该平面与光源方向垂直，且经过相机位置。）
-                      if (d == 0f) d = 1e-6f; // 不让d为0，防止计算错误。
-                      var sign = d < 0 ? -1f : 1f; // 决定l1, l2 =>l1需要在Y方向为正， l2在Y方向为负？
-                      // 切线所在的平面与圆锥构成一个以`origin`为圆心的界面圆。
-                      var origin = vertex + axis * d; // origin: 相机在光源方向的投影的位置。
-                      var radius = math.abs(d) * circleRadius / coneHeight; // 通过相似三角形计算出截面圆的半径。
-                      // 因为截面圆垂直与光源方向，且`circleU` 和 `circleV`为同样垂直与光源方向的一对基向量。 又因为截面圆与底面圆的圆心都经过光源方向。 可以将相机位置在截面圆所在平面的投影，通过`circleU` 和 `circleV`进行表示。
-                      var cameraUV = math.float2(math.dot(circleU, -origin), math.dot(circleV, -origin)); // 计算相机位置在相机底面上的投影，在以`circleU` 和 `circleV`为基向量的2D空间中表达。
-                      var polar = math.float3(cameraUV, -square(radius)); // 构建相机投影在截面圆上的极线方程：  cameraUV.x * X + cameraUV.y * Y = radius^2。 
-                      // p1, p2分别为极线与直线X=1, X=-1的交点。
-                      var p1 = math.float2(-1, -polar.x / polar.y * (-1) - polar.z / polar.y); 
-                      var p2 = math.float2(1, -polar.x / polar.y * 1 - polar.z / polar.y);
-                      var lineDirection = math.normalize(p2 - p1); // 极线的方向
-                      var lineNormal = math.float2(lineDirection.y, -lineDirection.x); // 垂直极线的方向，从截面圆圆心指向相机位置。
-                      var distToLine = math.dot(p1, lineNormal); // 截面圆圆心到极线的距离。
-                      var lineCenter = lineNormal * distToLine; // 极线与lineNormal的交点
-                      var l = math.sqrt(radius * radius - distToLine * distToLine); // lineCenter到切点的距离。
-                      // 切点 x1UV， x2UV。
-                      var x1UV = lineCenter + l * lineDirection; 
-                      var x2UV = lineCenter - l * lineDirection;
-                      // 光源位置经切点的方向 dir1， dir2。
-                      var dir1 = math.normalize((origin + x1UV.x * circleU + x1UV.y * circleV) - vertex) * sign;
-                      var dir2 = math.normalize((origin + x2UV.x * circleU + x2UV.y * circleV) - vertex) * sign;
-                      l1 = dir1 * range;
-                      l2 = dir2 * range;
-                  }
-                  ```  
-                - 
-              ``` C#
-                // Calculate the lines making up the sides of the cone as seen from the camera. `l1` and `l2` form lines
-                // from the light position.
-                GetConeSideTangentPoints(lightPositionVS, lightDirectionVS, cosHalfAngle, baseRadius, coneHeight, range, coneU, coneV, out var l1, out var l2);
-
-                // Inside the above function there is a check:
-                // if (math.dot(math.normalize(-vertex), axis) >= cosHalfAngle)
-                //    return;
-                // So l1 and l2 can be zero vectors.
-
-                // Check for division by 0
-                if ((l1.x != 0.0f) && (l1.y != 0.0f) && (l1.z != 0.0f)) 
+                static void GetConeSideTangentPoints(float3 vertex, float3 axis, float cosHalfAngle, float circleRadius, float coneHeight, float range, float3 circleU, float3 circleV, out float3 l1, out float3 l2)
                 {
+                    l1 = l2 = 0;
+                    // 计算相机到光源的线段与光源方向形成的夹角。
+                    // 如果夹角小于圆锥的半角，说明圆锥在XY方向的投影包含了相机。故相机到圆锥上的切线，不进行后续计算。
+                    if (math.dot(math.normalize(-vertex), axis) >= cosHalfAngle)
+                    {
+                        return;
+                    }
+
+                    var d = -math.dot(vertex, axis); // 相机在光源方向的投影长度。 =》 确定切点所在的平面。 （该平面与光源方向垂直，且经过相机位置。）
+                    if (d == 0f) d = 1e-6f; // 不让d为0，防止计算错误。
+                    var sign = d < 0 ? -1f : 1f; // 决定l1, l2 =>l1需要在Y方向为正， l2在Y方向为负？
+                    // 切线所在的平面与圆锥构成一个以`origin`为圆心的界面圆。
+                    var origin = vertex + axis * d; // origin: 相机在光源方向的投影的位置。
+                    var radius = math.abs(d) * circleRadius / coneHeight; // 通过相似三角形计算出截面圆的半径。
+                    // 因为截面圆垂直与光源方向，且`circleU` 和 `circleV`为同样垂直与光源方向的一对基向量。 又因为截面圆与底面圆的圆心都经过光源方向。 可以将相机位置在截面圆所在平面的投影，通过`circleU` 和 `circleV`进行表示。
+                    var cameraUV = math.float2(math.dot(circleU, -origin), math.dot(circleV, -origin)); // 计算相机位置在相机底面上的投影，在以`circleU` 和 `circleV`为基向量的2D空间中表达。
+                    var polar = math.float3(cameraUV, -square(radius)); // 构建相机投影在截面圆上的极线方程：  cameraUV.x * X + cameraUV.y * Y = radius^2。 
+                    // p1, p2分别为极线与直线X=1, X=-1的交点。
+                    var p1 = math.float2(-1, -polar.x / polar.y * (-1) - polar.z / polar.y); 
+                    var p2 = math.float2(1, -polar.x / polar.y * 1 - polar.z / polar.y);
+                    var lineDirection = math.normalize(p2 - p1); // 极线的方向
+                    var lineNormal = math.float2(lineDirection.y, -lineDirection.x); // 垂直极线的方向，从截面圆圆心指向相机位置。
+                    var distToLine = math.dot(p1, lineNormal); // 截面圆圆心到极线的距离。
+                    var lineCenter = lineNormal * distToLine; // 极线与lineNormal的交点
+                    var l = math.sqrt(radius * radius - distToLine * distToLine); // lineCenter到切点的距离。
+                    // 切点 x1UV， x2UV。
+                    var x1UV = lineCenter + l * lineDirection; 
+                    var x2UV = lineCenter - l * lineDirection;
+                    // 光源位置经切点的方向 dir1， dir2。
+                    var dir1 = math.normalize((origin + x1UV.x * circleU + x1UV.y * circleV) - vertex) * sign;
+                    var dir2 = math.normalize((origin + x2UV.x * circleU + x2UV.y * circleV) - vertex) * sign;
+                    l1 = dir1 * range;
+                    l2 = dir2 * range;
+                }
+                ```  
+                ![20250804110656](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250804110656.png)
+              - 计算l1, l2与视锥的Y方向的上下面是否存在交点。 如果存在交点，将最大/最小行的cluster行在Y方向上进行标记。
+                ``` C#
+                  if ((l1.x != 0.0f) && (l1.y != 0.0f) && (l1.z != 0.0f)) //避免除以0
+                  {
+                    // 视锥体Y方向下平面的法线。
+                    // 因为viewPlaneBottoms为在 z=1 平面上，屏幕可见区域的最低 Y 值。 这里可以得到法线math.float3(0, 1, viewPlaneBottoms[m_ViewIndex])
                     var planeNormal = math.float3(0, 1, viewPlaneBottoms[m_ViewIndex]);
                     var l1t = math.dot(-lightPositionVS, planeNormal) / math.dot(l1, planeNormal);
-                    var l1x = lightPositionVS + l1 * l1t;
-                    if (l1t >= 0 && l1t <= 1 && l1x.z >= near) ExpandY(l1x);
-                }
+                    var l1x = lightPositionVS + l1 * l1t; // l1x: l1 与 视锥体Y方向下平面的交点。
+                    if (l1t >= 0 && l1t <= 1 && l1x.z >= near) ExpandY(l1x); // l1t >= 0 && l1t <= 1: 保证平面与圆锥相交。 l1x.z >= near： 交点是否在视锥体内。
+                  }
 
-                // Check for division by 0
-                if ((l2.x != 0.0f) && (l2.y != 0.0f) && (l2.z != 0.0f))
-                {
-                    var planeNormal = math.float3(0, 1, viewPlaneTops[m_ViewIndex]);
-                    var l1t = math.dot(-lightPositionVS, planeNormal) / math.dot(l1, planeNormal);
-                    var l1x = lightPositionVS + l1 * l1t;
-                    if (l1t >= 0 && l1t <= 1 && l1x.z >= near) ExpandY(l1x);
-                }
-              ```  
+                  if ((l2.x != 0.0f) && (l2.y != 0.0f) && (l2.z != 0.0f)) 
+                  {
+                      var planeNormal = math.float3(0, 1, viewPlaneTops[m_ViewIndex]);
+                      var l1t = math.dot(-lightPositionVS, planeNormal) / math.dot(l1, planeNormal); // 这里应该是笔误？应该要及时的是l2 与 视锥体Y方向上平面的交点。
+                      var l1x = lightPositionVS + l1 * l1t;
+                      if (l1t >= 0 && l1t <= 1 && l1x.z >= near) ExpandY(l1x);
+                  }
+                ```
+              - 计算l1, l2与各行Cluster行在Y方向上下界。
+                ``` c#
+                for (var planeIndex = m_TileYRange.start + 1; planeIndex <= m_TileYRange.end; planeIndex++)
+                ``` 
           - 
   - `TileRangeExpansionJob`: 将`TilingJob`中计算的结果写入`m_TileMasks`中。 遍历各个Y方向的Tile分区（遍历Tile行）
     - 遍历各个Local lights，记录该Y方向的Tile分区上，各个Local lights在X方向的Tile分区上的影响的范围（itemRanges）。（剔除在该Y方向Tile分区没影响的光源/反射探针）
