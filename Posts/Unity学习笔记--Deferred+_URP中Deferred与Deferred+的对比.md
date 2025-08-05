@@ -743,9 +743,64 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
                       if (l1t >= 0 && l1t <= 1 && l1x.z >= near) ExpandY(l1x);
                   }
                 ```
-              - 计算l1, l2与各行Cluster行在Y方向上下界。
+              - 计算l1, l2与各Tile行在Y方向上界的交点，判断Tile行是否受到该spot light影响。
                 ``` c#
+                for (var planeIndex = m_TileYRange.start + 1; planeIndex <= m_TileYRange.end; planeIndex++) // 视锥体的Y方向上的最大，最小面在上文已被处理，这里的循环将其忽略了？
+                {
+                    var planeRange = InclusiveRange.empty;
+
+                    // Y-position on the view plane (Z=1)
+                    var planeY = math.lerp(viewPlaneBottoms[m_ViewIndex], viewPlaneTops[m_ViewIndex], planeIndex * tileScaleInv.y);
+
+                    var planeNormal = math.float3(0, 1, -planeY);
+
+                    // Intersect lines with y-plane and clip if needed.
+                    // Check for division by 0
+                    if ((l1.x != 0.0f) && (l1.y != 0.0f) && (l1.z != 0.0f))
+                    { 
+                        var l1t = math.dot(-lightPositionVS, planeNormal) / math.dot(l1, planeNormal);
+                        var l1x = lightPositionVS + l1 * l1t;
+                        if (l1t >= 0 && l1t <= 1 && l1x.z >= near) planeRange.Expand((short)ViewToTileSpace(l1x).x);
+                    }
+                    // Check for division by 0
+                    if ((l2.x != 0.0f) && (l2.y != 0.0f) && (l2.z != 0.0f))
+                    {
+                        var l2t = math.dot(-lightPositionVS, planeNormal) / math.dot(l2, planeNormal);
+                        var l2x = lightPositionVS + l2 * l2t;
+                        if (l2t >= 0 && l2t <= 1 && l2x.z >= near) planeRange.Expand((short)ViewToTileSpace(l2x).x);
+                    }
+                }
+                ```
+              - 计算圆锥在近平面上与水平线 Y = planeY形成的交点p0，p1。
+                ``` C#
                 for (var planeIndex = m_TileYRange.start + 1; planeIndex <= m_TileYRange.end; planeIndex++)
+                {
+                  var planeY = math.lerp(viewPlaneBottoms[m_ViewIndex], viewPlaneTops[m_ViewIndex], planeIndex * tileScaleInv.y);
+
+                  if (coneIsClipping)
+                  {
+                      var y = planeY * near;
+                      var r = baseRadius / coneHeight;
+                      var theta = FindNearConicYTheta(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, y);
+                      var p0 = math.float3(EvaluateNearConic(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, theta.x).x, y, near);
+                      var p1 = math.float3(EvaluateNearConic(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, theta.y).x, y, near);
+                      if (ConicPointIsValid(p0)) planeRange.Expand((short)ViewToTileSpace(p0).x);
+                      if (ConicPointIsValid(p1)) planeRange.Expand((short)ViewToTileSpace(p1).x);
+                  }
+                }
+
+                static float2 FindNearConicYTheta(float near, float3 o, float3 d, float r, float3 u, float3 v, float y)
+                {
+                    var sqrt = math.sqrt(-square(d.y) * square(o.z) + 2 * square(d.y) * o.z * near - square(d.y) * square(near) + 2 * d.y * d.z * o.y * o.z - 2 * d.y * d.z * o.y * near - 2 * d.y * d.z * o.z * y + 2 * d.y * d.z * y * near - square(d.z) * square(o.y) + 2 * square(d.z) * o.y * y - square(d.z) * square(y) + square(o.y) * square(r) * square(u.z) + square(o.y) * square(r) * square(v.z) - 2 * o.y * o.z * square(r) * u.y * u.z - 2 * o.y * o.z * square(r) * v.y * v.z - 2 * o.y * y * square(r) * square(u.z) - 2 * o.y * y * square(r) * square(v.z) + 2 * o.y * square(r) * u.y * u.z * near + 2 * o.y * square(r) * v.y * v.z * near + square(o.z) * square(r) * square(u.y) + square(o.z) * square(r) * square(v.y) + 2 * o.z * y * square(r) * u.y * u.z + 2 * o.z * y * square(r) * v.y * v.z - 2 * o.z * square(r) * square(u.y) * near - 2 * o.z * square(r) * square(v.y) * near + square(y) * square(r) * square(u.z) + square(y) * square(r) * square(v.z) - 2 * y * square(r) * u.y * u.z * near - 2 * y * square(r) * v.y * v.z * near + square(r) * square(u.y) * square(near) + square(r) * square(v.y) * square(near));
+                    var denom = d.y * o.z - d.y * near - d.z * o.y + d.z * y + o.y * r * u.z - o.z * r * u.y - y * r * u.z + r * u.y * near;
+                    return 2 * math.atan((r * (o.y * v.z - o.z * v.y - y * v.z + v.y * near) + math.float2(1, -1) * sqrt) / denom);
+                }
+
+                static float3 EvaluateNearConic(float near, float3 o, float3 d, float r, float3 u, float3 v, float theta)
+                {
+                    var h = (near - o.z) / (d.z + r * u.z * math.cos(theta) + r * v.z * math.sin(theta));
+                    return math.float3(o.xy + h * (d.xy + r * u.xy * math.cos(theta) + r * v.xy * math.sin(theta)), near);
+                }
                 ``` 
           - 
   - `TileRangeExpansionJob`: 将`TilingJob`中计算的结果写入`m_TileMasks`中。 遍历各个Y方向的Tile分区（遍历Tile行）

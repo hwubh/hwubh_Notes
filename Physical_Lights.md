@@ -86,4 +86,9 @@ dynamic的情况需要考虑是否开启了后处理
         - 中亮度区域 -> 线性响应
         - 高亮度区域 -> 平缓曲线 (保护高光)
   - DoHistogramBasedExposure: 
-    - 
+
+- HDRP + deferred: 
+  - 在绘制Gbuffer时，会对Gbuffer3中GI（lightmap）进行曝光值矫正。 ![20250805141339](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250805141339.png) （Lit.hlsl） 。 然后在后续进行光照计算前，会对Gbuffer3中的结果除以曝光值以还原正确的物理量。 ![20250805141546](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250805141546.png)（Lit.hlsl）。 最后在Deferred.compute中对最后的光照结果进步曝光值矫正。![20250805142412](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250805142412.png)
+  > 考虑到R10G10B11格式的HDR贴图每个通道上最大值估计为65,048，且高值区域的浮点精度较低。因此需要通过预处理曝光来保证计算结果的精度。
+
+  > HMI RP中通过将"输入的light color 除以1000， exposure value 乘以1000"来避免光照运算结果数值过大的问题。 =》不仅可以节省GI等项的预曝光和逆曝光操作，还可以保证在运算过程中可以使用half精度来存储一些中间项，而不是必须使用float精度来避免截断或精度问题。
