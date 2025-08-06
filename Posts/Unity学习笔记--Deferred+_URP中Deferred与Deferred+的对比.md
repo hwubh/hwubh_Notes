@@ -672,7 +672,7 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
 
               static float3 EvaluateNearConic(float near, float3 o, float3 d, float r, float3 u, float3 v, float theta)
               {
-                  //根据相似三角形得到交点的坐标。
+                  // 式子 P_z(h) = （o + h * dir(θ)）.z = -near 得到，P_z(h)为切线上一个Z坐标为near的点。
                   var h = (near - o.z) / (d.z + r * u.z * math.cos(theta) + r * v.z * math.sin(theta)); 
                   return math.float3(o.xy + h * (d.xy + r * u.xy * math.cos(theta) + r * v.xy * math.sin(theta)), near);
               }
@@ -779,27 +779,29 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
 
                   if (coneIsClipping)
                   {
-                      var y = planeY * near;
+                      var y = planeY * near; // 上边界在近平面上的Y方向的取值。
                       var r = baseRadius / coneHeight;
-                      var theta = FindNearConicYTheta(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, y);
+                      var theta = FindNearConicYTheta(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, y);// 求圆锥与三维空间直线（Y = PlaneY， Z = near）的交点所在的直线的方向。
                       var p0 = math.float3(EvaluateNearConic(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, theta.x).x, y, near);
                       var p1 = math.float3(EvaluateNearConic(near, lightPositionVS, lightDirectionVS, r, coneU, coneV, theta.y).x, y, near);
-                      if (ConicPointIsValid(p0)) planeRange.Expand((short)ViewToTileSpace(p0).x);
+                      if (ConicPointIsValid(p0)) planeRange.Expand((short)ViewToTileSpace(p0).x);  // 
                       if (ConicPointIsValid(p1)) planeRange.Expand((short)ViewToTileSpace(p1).x);
                   }
                 }
 
                 static float2 FindNearConicYTheta(float near, float3 o, float3 d, float r, float3 u, float3 v, float y)
                 {
-                    var sqrt = math.sqrt(-square(d.y) * square(o.z) + 2 * square(d.y) * o.z * near - square(d.y) * square(near) + 2 * d.y * d.z * o.y * o.z - 2 * d.y * d.z * o.y * near - 2 * d.y * d.z * o.z * y + 2 * d.y * d.z * y * near - square(d.z) * square(o.y) + 2 * square(d.z) * o.y * y - square(d.z) * square(y) + square(o.y) * square(r) * square(u.z) + square(o.y) * square(r) * square(v.z) - 2 * o.y * o.z * square(r) * u.y * u.z - 2 * o.y * o.z * square(r) * v.y * v.z - 2 * o.y * y * square(r) * square(u.z) - 2 * o.y * y * square(r) * square(v.z) + 2 * o.y * square(r) * u.y * u.z * near + 2 * o.y * square(r) * v.y * v.z * near + square(o.z) * square(r) * square(u.y) + square(o.z) * square(r) * square(v.y) + 2 * o.z * y * square(r) * u.y * u.z + 2 * o.z * y * square(r) * v.y * v.z - 2 * o.z * square(r) * square(u.y) * near - 2 * o.z * square(r) * square(v.y) * near + square(y) * square(r) * square(u.z) + square(y) * square(r) * square(v.z) - 2 * y * square(r) * u.y * u.z * near - 2 * y * square(r) * v.y * v.z * near + square(r) * square(u.y) * square(near) + square(r) * square(v.y) * square(near));
+                    var sqrt = ;//...omitted 这里比较复杂。sqrt是将圆锥方程与三维空间直线（Y = PlaneY， Z = near） 联立的方程的判别式。 sqrt >= 时圆锥与该直线存在交点。
                     var denom = d.y * o.z - d.y * near - d.z * o.y + d.z * y + o.y * r * u.z - o.z * r * u.y - y * r * u.z + r * u.y * near;
-                    return 2 * math.atan((r * (o.y * v.z - o.z * v.y - y * v.z + v.y * near) + math.float2(1, -1) * sqrt) / denom);
+                    return 2 * math.atan((r * (o.y * v.z - o.z * v.y - y * v.z + v.y * near) + math.float2(1, -1) * sqrt) / denom); // 圆锥与直线的交点的参数。 圆锥参数方程 “P(θ) = o + h(θ) * [d + r(u·cosθ + v·sinθ)]” 中的 θ。
                 }
 
                 static float3 EvaluateNearConic(float near, float3 o, float3 d, float r, float3 u, float3 v, float theta)
                 {
-                    var h = (near - o.z) / (d.z + r * u.z * math.cos(theta) + r * v.z * math.sin(theta));
-                    return math.float3(o.xy + h * (d.xy + r * u.xy * math.cos(theta) + r * v.xy * math.sin(theta)), near);
+                  // 圆锥参数方程中带入Z = near得到： P_z(θ) = o.z + h(θ) * [d.z + r(u·cosθ + v·sinθ)]  h代表方向向量[d + r(u·cosθ + v·sinθ)]希望的“长度”。
+                  // 需要注意的是方向向量[d + r(u·cosθ + v·sinθ)]不是单位向量，光源轴线方向的向量d才是。
+                  var h = (near - o.z) / (d.z + r * u.z * math.cos(theta) + r * v.z * math.sin(theta));
+                  return math.float3(o.xy + h * (d.xy + r * u.xy * math.cos(theta) + r * v.xy * math.sin(theta)), near);
                 }
                 ``` 
           - 
