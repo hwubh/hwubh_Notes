@@ -804,7 +804,94 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
                   return math.float3(o.xy + h * (d.xy + r * u.xy * math.cos(theta) + r * v.xy * math.sin(theta)), near);
                 }
                 ``` 
-          - 
+                ![20250807170652](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250807170652.png)
+              - 计算圆锥外接圆与水平面 Y = planeY的交点sphereTile0， sphereTile1
+                ```C#
+                var sphereClipRadius = math.sqrt(rangesq - square(near - lightPositionVS.z));
+
+                for (var planeIndex = m_TileYRange.start + 1; planeIndex <= m_TileYRange.end; planeIndex++)
+                {
+                  planeY = math.lerp(viewPlaneBottoms[m_ViewIndex], viewPlaneTops[m_ViewIndex], planeIndex * tileScaleInv.y);
+                  GetSphereYPlaneHorizon(lightPositionVS, range, near, sphereClipRadius, planeY, out var sphereTile0, out var sphereTile1);
+                  if (SpherePointIsValid(sphereTile0)) planeRange.Expand((short)ViewToTileSpace(sphereTile0).x);
+                  if (SpherePointIsValid(sphereTile1)) planeRange.Expand((short)ViewToTileSpace(sphereTile1).x);
+                }
+
+                static void GetSphereYPlaneHorizon(float3 center, float sphereRadius, float near, float clipRadius, float y, out float3 left, out float3 right)
+                {
+                    // 因为'y'为平面planeY在view plane(Z = 1)的取值， 根据相似三角形，得到planeY在近平面上的取值yNear。
+                    var yNear = y * near;
+
+                    // 求球体在近平面的截面圆在平面y-plane (Y = yNear)上的两个交点 left， right。
+                    var clipHalfWidth = math.sqrt(square(clipRadius) - square(yNear - center.y));
+                    left = math.float3(center.x - clipHalfWidth, yNear, near);
+                    right = math.float3(center.x + clipHalfWidth, yNear, near);
+
+                    // 平面y-plane 上的一对基函数，用于后续构建平面的参数方程。
+                    var planeU = math.normalize(math.float3(0, y, 1));
+                    var planeV = math.float3(1, 0, 0);
+
+                    // Calculate the normal of the y-plane. Found from: (0, y, 1) × (1, 0, 0) = (0, 1, -y)
+                    // This is used to represent the plane along with the origin, which is just 0 and thus doesn't show up
+                    // in the calculations.
+                    var normal = math.normalize(math.float3(0, 1, -y));
+
+                    // We want to first find the circle from the intersection of the y-plane and the sphere.
+
+                    // The shortest distance from the sphere center and the y-plane. The sign determines which side of the plane
+                    // the center is on.
+                    var signedDistance = math.dot(normal, center);
+
+                    // Unsigned shortest distance from the sphere center to the plane.
+                    var distanceToPlane = math.abs(signedDistance);
+
+                    // The center of the intersection circle in the y-plane, which is the point on the plane closest to the
+                    // sphere center. I.e. this is at `distanceToPlane` from the center.
+                    var centerOnPlane = math.float2(math.dot(center, planeU), math.dot(center, planeV));
+
+                    // Distance from origin to the circle center.
+                    var distanceInPlane = math.length(centerOnPlane);
+
+                    // Direction from origin to the circle center.
+                    var directionPS = centerOnPlane / distanceInPlane;
+
+                    // Calculate the radius of the circle using Pythagoras. We know that any point on the circle is a point on
+                    // the sphere. Thus we can construct a triangle with the sphere center, circle center, and a point on the
+                    // circle. We then want to find its distance to the circle center, as that will be equal to the radius. As
+                    // the point is on the sphere, it must be `sphereRadius` from the sphere center, forming the hypotenuse. The
+                    // other side is between the sphere and circle centers, which we've already calculated to be
+                    // `distanceToPlane`.
+                    var circleRadius = math.sqrt(square(sphereRadius) - square(distanceToPlane));
+
+                    // Now that we have the circle, we can find the horizon points. Since we've parametrized the plane, we can
+                    // just do this in 2D.
+
+                    // Any of these conditions will yield NaN due to negative square roots. They are signs that clipping is needed,
+                    // so we fallback on the already calculated values in that case.
+                    if (square(distanceToPlane) <= square(sphereRadius) && square(circleRadius) <= square(distanceInPlane))
+                    {
+                        // Distance from origin to circle horizon edge.
+                        var l = math.sqrt(square(distanceInPlane) - square(circleRadius));
+
+                        // Height of circle horizon.
+                        var h = l * circleRadius / distanceInPlane;
+
+                        // Center of circle horizon.
+                        var c = directionPS * (l * h / circleRadius);
+
+                        // Calculate the horizon points in the plane.
+                        var leftOnPlane = c + math.float2(directionPS.y, -directionPS.x) * h;
+                        var rightOnPlane = c + math.float2(-directionPS.y, directionPS.x) * h;
+
+                        // Transform horizon points to view space and use if not clipped.
+                        var leftCandidate = leftOnPlane.x * planeU + leftOnPlane.y * planeV;
+                        if (leftCandidate.z >= near) left = leftCandidate;
+
+                        var rightCandidate = rightOnPlane.x * planeU + rightOnPlane.y * planeV;
+                        if (rightCandidate.z >= near) right = rightCandidate;
+                    }
+                }
+                ``` 
   - `TileRangeExpansionJob`: 将`TilingJob`中计算的结果写入`m_TileMasks`中。 遍历各个Y方向的Tile分区（遍历Tile行）
     - 遍历各个Local lights，记录该Y方向的Tile分区上，各个Local lights在X方向的Tile分区上的影响的范围（itemRanges）。（剔除在该Y方向Tile分区没影响的光源/反射探针）
       ``` C#
