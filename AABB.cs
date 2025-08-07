@@ -29,7 +29,7 @@ public class AABB : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        //DrawFrustum();
+        DrawFrustum();
         Pers();
     }
 
@@ -272,21 +272,94 @@ public class AABB : MonoBehaviour
         Debug.DrawLine(vertex, vertex + l2, Color.peru);
     }
 
+    static void GetSphereYPlaneHorizon(float3 center, float sphereRadius, float near, float clipRadius, float y, out float3 left, out float3 right)
+    {
+        // Note: The y-plane is the plane that is determined by `y` in that it contains the vector (1, 0, 0)
+        // and goes through the points (0, y, 1) and (0, 0, 0). This would become a straight line in screen-space, and so it
+        // represents the boundary between two rows of tiles.
+
+        // Near-plane clipping - will get overwritten if no clipping is needed.
+        // `y` is given for the view plane (Z=1), scale it so that it is on the near plane instead.
+        var yNear = y * near;
+        // Find the two points of intersection between the clip circle of the sphere and the y-plane.
+        // Found using Pythagoras with a right triangle formed by three points:
+        // (a) center of the clip circle
+        // (b) a point straight above the clip circle center on the y-plane
+        // (c) a point that is both on the circle and the y-plane (this is the point we want to find in the end)
+        // The hypotenuse is formed by (a) and (c) with length equal to the clip radius. The known side is
+        // formed by (a) and (b) and is simply the distance from the center to the y-plane along the y-axis.
+        // The remaining side gives us the x-displacement needed to find the intersection points.
+        var clipHalfWidth = math.sqrt(square(clipRadius) - square(yNear - center.y));
+        left = math.float3(center.x - clipHalfWidth, yNear, near);
+        right = math.float3(center.x + clipHalfWidth, yNear, near);
+
+        // Basis vectors in the y-plane for being able to parameterize the plane.
+        var planeU = math.normalize(math.float3(0, y, 1));
+        var planeV = math.float3(1, 0, 0);
+
+        // Calculate the normal of the y-plane. Found from: (0, y, 1) × (1, 0, 0) = (0, 1, -y)
+        // This is used to represent the plane along with the origin, which is just 0 and thus doesn't show up
+        // in the calculations.
+        var normal = math.normalize(math.float3(0, 1, -y));
+
+        // We want to first find the circle from the intersection of the y-plane and the sphere.
+
+        // The shortest distance from the sphere center and the y-plane. The sign determines which side of the plane
+        // the center is on.
+        var signedDistance = math.dot(normal, center);
+
+        // Unsigned shortest distance from the sphere center to the plane.
+        var distanceToPlane = math.abs(signedDistance);
+
+        // The center of the intersection circle in the y-plane, which is the point on the plane closest to the
+        // sphere center. I.e. this is at `distanceToPlane` from the center.
+        var centerOnPlane = math.float2(math.dot(center, planeU), math.dot(center, planeV));
+
+        // Distance from origin to the circle center.
+        var distanceInPlane = math.length(centerOnPlane);
+
+        // Direction from origin to the circle center.
+        var directionPS = centerOnPlane / distanceInPlane;
+
+        // Calculate the radius of the circle using Pythagoras. We know that any point on the circle is a point on
+        // the sphere. Thus we can construct a triangle with the sphere center, circle center, and a point on the
+        // circle. We then want to find its distance to the circle center, as that will be equal to the radius. As
+        // the point is on the sphere, it must be `sphereRadius` from the sphere center, forming the hypotenuse. The
+        // other side is between the sphere and circle centers, which we've already calculated to be
+        // `distanceToPlane`.
+        var circleRadius = math.sqrt(square(sphereRadius) - square(distanceToPlane));
+
+        // Now that we have the circle, we can find the horizon points. Since we've parametrized the plane, we can
+        // just do this in 2D.
+
+        // Any of these conditions will yield NaN due to negative square roots. They are signs that clipping is needed,
+        // so we fallback on the already calculated values in that case.
+        if (square(distanceToPlane) <= square(sphereRadius) && square(circleRadius) <= square(distanceInPlane))
+        {
+            // Distance from origin to circle horizon edge.
+            var l = math.sqrt(square(distanceInPlane) - square(circleRadius));
+
+            // Height of circle horizon.
+            var h = l * circleRadius / distanceInPlane;
+
+            // Center of circle horizon.
+            var c = directionPS * (l * h / circleRadius);
+
+            // Calculate the horizon points in the plane.
+            var leftOnPlane = c + math.float2(directionPS.y, -directionPS.x) * h;
+            var rightOnPlane = c + math.float2(-directionPS.y, directionPS.x) * h;
+
+            // Transform horizon points to view space and use if not clipped.
+            var leftCandidate = leftOnPlane.x * planeU + leftOnPlane.y * planeV;
+            if (leftCandidate.z >= near) left = leftCandidate;
+
+            var rightCandidate = rightOnPlane.x * planeU + rightOnPlane.y * planeV;
+            if (rightCandidate.z >= near) right = rightCandidate;
+        }
+    }
+
     public void Pers()
     {
-        var vertex = new Vector3[8];
-        //for (var i = 0; i < 4; i++)
-        //{
-        //    // Convert index to x, y, and z in [-1, 1]
-        //    var x = ((i << 1) & 2) - 1;
-        //    var y = (i & 2) - 1;
-        //    vertex[i] = new Vector3(x * 5, y * 5, 4);
-        //}
-        //Debug.DrawLine(vertex[0], vertex[1], Color.green);
-        //Debug.DrawLine(vertex[1], vertex[3], Color.green);
-        //Debug.DrawLine(vertex[3], vertex[2], Color.green);
-        //Debug.DrawLine(vertex[0], vertex[2], Color.green);
-
         var lightOrigin = new Vector3(0, 0, depth);
         var range = 10f;
         var ray = new Vector3(1f, 1f, angle).normalized;
@@ -311,43 +384,12 @@ public class AABB : MonoBehaviour
         var baseRadius = math.sqrt(range * range - height * height);
         var baseCenter = lightOrigin + ray * height;
 
-        // Calculate Z bounds of cone and check if it's overlapping with the near plane.
-        // From https://www.iquilezles.org/www/articles/diskbbox/diskbbox.htm
-        var baseExtentZ = baseRadius * math.sqrt(1.0f - square(rayValue.z));
-        var coneIsClipping = near >= math.min(baseCenter.z - baseExtentZ, lightOrigin.z) && near <= math.max(baseCenter.z + baseExtentZ, lightOrigin.z);
+        GetSphereYPlaneHorizon(lightOrigin, range, near, sphereClipRadius, 0.75f, out var sphereTile0, out var sphereTile1);
 
-        var coneU = math.normalize(math.cross(rayValue, lightOrigin));
-        // The cross product will be the 0-vector if the light-direction and camera-to-light-position vectors are parallel.
-        // In that case, {1, 0, 0} is orthogonal to the light direction and we use that instead.
-        coneU = math.normalize(coneU); // math.csum(coneU) != 0f ? math.normalize(coneU) : math.float3(1, 0, 0);
-        var coneV = math.cross(rayValue, coneU);
-
-        Debug.DrawLine(origin, origin + new Vector3(coneU.x, coneU.y, coneU.z) * radius, Color.white);
-        Debug.DrawLine(origin, origin + new Vector3(coneV.x, coneV.y, coneV.z) * radius, Color.white);
-
-        Debug.DrawLine(lightOrigin, origin + new Vector3(coneU.x, coneU.y, coneU.z) * radius, Color.blue);
-        Debug.DrawLine(lightOrigin, origin + new Vector3(coneV.x, coneV.y, coneV.z) * radius, Color.blue);
-        Debug.DrawLine(lightOrigin, origin - new Vector3(coneU.x, coneU.y, coneU.z) * radius, Color.blue);
-        Debug.DrawLine(lightOrigin, origin - new Vector3(coneV.x, coneV.y, coneV.z) * radius, Color.blue);
-
-        var planeY = 0.75f;
-        if (coneIsClipping)
-        {
-            var y = planeY * near;
-            var r = baseRadius / height;
-            var theta = FindNearConicYTheta(near, lightOrigin, ray, r, coneU, coneV, y);
-            var h = rayValue + r * coneU * math.cos(theta.x) + r * coneV * math.sin(theta.x);
-            var test = coneU * math.cos(theta.x) + coneV * math.sin(theta.x);
-            var p0 = math.float3(EvaluateNearConic(near, lightOrigin, ray, r, coneU, coneV, theta.x).x, y, near);
-            var p1 = math.float3(EvaluateNearConic(near, lightOrigin, ray, r, coneU, coneV, theta.y).x, y, near);
-            Debug.DrawLine(lightOrigin,  new Vector3(p0.x, p0.y, p0.z), Color.yellow);
-            Debug.DrawLine(lightOrigin,  new Vector3(p1.x, p1.y, p1.z), Color.yellow);
-            Debug.DrawLine(origin, origin + radius * new Vector3(test.x, test.y, test.z), Color.black);
-            Debug.DrawLine(lightOrigin, lightOrigin + range * new Vector3(h.x, h.y, h.z) * (height / range), Color.pink);
-        }
-
-        Debug.DrawLine(new Vector3(0, 100, near), new Vector3(0, -100, near), Color.green);
-        Debug.DrawLine(new Vector3(0, 3, -100), new Vector3(0, 3, 100), Color.green);
+        var test0 = sphereTile0 - new float3(0, 0, depth);
+        DrawCircle(lightOrigin, range, Color.blue, Panel.XY, Vector3.Cross(sphereTile0 - new float3(0, 0, depth), sphereTile1 - new float3(0, 0, depth)));
+        Debug.DrawLine(lightOrigin, sphereTile0, Color.yellow);
+        Debug.DrawLine(lightOrigin, sphereTile1, Color.yellow);
     }
 
     public void Orth() 
@@ -923,6 +965,73 @@ public class AABB : MonoBehaviour
             var l1t = math.dot(-lightOrigin, planeNormal) / math.dot(l1, planeNormal);
             Vector3 l1x = lightOrigin + new Vector3(l1.x, l1.y, l1.z) * l1t;
         }
+    }
+
+    public void Pers_Cone_Clipping_PlaneY()
+    {
+        var vertex = new Vector3[8];
+        var lightOrigin = new Vector3(0, 0, depth);
+        var range = 10f;
+        var ray = new Vector3(1f, 1f, angle).normalized;
+        var orientation = Quaternion.FromToRotation(Vector3.back, ray);
+        float3 rayValue = new float3(ray);
+        //DrawCircle(lightOrigin, range, Color.yellow, Panel.ZY, Vector3.forward);
+
+        var radius = 6f;
+        var height = 8f;
+        var origin = lightOrigin + ray * height;
+        Debug.DrawLine(lightOrigin, origin, Color.red);
+        DrawCircle(origin, radius, Color.blue, Panel.XY, ray);
+
+        var cameraPosWS = Vector3.zero;
+        var near = 4f;
+        var rangesq = square(range);
+        var sphereClipRadius = math.sqrt(rangesq - square(near - lightOrigin.z));
+
+        var baseUY = math.abs(math.abs(rayValue.x) - 1) < 1e-6f ? math.float3(0, 1, 0) : math.normalize(math.cross(rayValue, math.float3(1, 0, 0)));
+        var baseVY = math.cross(rayValue, baseUY);
+
+        var baseRadius = math.sqrt(range * range - height * height);
+        var baseCenter = lightOrigin + ray * height;
+
+        // Calculate Z bounds of cone and check if it's overlapping with the near plane.
+        // From https://www.iquilezles.org/www/articles/diskbbox/diskbbox.htm
+        var baseExtentZ = baseRadius * math.sqrt(1.0f - square(rayValue.z));
+        var coneIsClipping = near >= math.min(baseCenter.z - baseExtentZ, lightOrigin.z) && near <= math.max(baseCenter.z + baseExtentZ, lightOrigin.z);
+
+        var coneU = math.normalize(math.cross(rayValue, lightOrigin));
+        // The cross product will be the 0-vector if the light-direction and camera-to-light-position vectors are parallel.
+        // In that case, {1, 0, 0} is orthogonal to the light direction and we use that instead.
+        coneU = math.normalize(coneU); // math.csum(coneU) != 0f ? math.normalize(coneU) : math.float3(1, 0, 0);
+        var coneV = math.cross(rayValue, coneU);
+
+        Debug.DrawLine(origin, origin + new Vector3(coneU.x, coneU.y, coneU.z) * radius, Color.white);
+        Debug.DrawLine(origin, origin + new Vector3(coneV.x, coneV.y, coneV.z) * radius, Color.white);
+
+        Debug.DrawLine(lightOrigin, origin + new Vector3(coneU.x, coneU.y, coneU.z) * radius, Color.blue);
+        Debug.DrawLine(lightOrigin, origin + new Vector3(coneV.x, coneV.y, coneV.z) * radius, Color.blue);
+        Debug.DrawLine(lightOrigin, origin - new Vector3(coneU.x, coneU.y, coneU.z) * radius, Color.blue);
+        Debug.DrawLine(lightOrigin, origin - new Vector3(coneV.x, coneV.y, coneV.z) * radius, Color.blue);
+
+        var planeY = 0.75f;
+        if (coneIsClipping)
+        {
+            var y = planeY * near;
+            var r = baseRadius / height;
+            var theta = FindNearConicYTheta(near, lightOrigin, ray, r, coneU, coneV, y);
+            var h = rayValue + r * coneU * math.cos(theta.x) + r * coneV * math.sin(theta.x);
+            var test = coneU * math.cos(theta.x) + coneV * math.sin(theta.x);
+            var p0 = math.float3(EvaluateNearConic(near, lightOrigin, ray, r, coneU, coneV, theta.x).x, y, near);
+            var p1 = math.float3(EvaluateNearConic(near, lightOrigin, ray, r, coneU, coneV, theta.y).x, y, near);
+            //Debug.DrawLine(origin, origin + radius * new Vector3(test.x, test.y, test.z), Color.black);
+            //Debug.DrawLine(lightOrigin, lightOrigin + range * new Vector3(h.x, h.y, h.z) * (height / range), Color.pink);
+            Debug.DrawLine(lightOrigin, new Vector3(p0.x, p0.y, p0.z), Color.yellow);
+            Debug.DrawLine(lightOrigin, new Vector3(p1.x, p1.y, p1.z), Color.yellow);
+        }
+
+        Debug.DrawLine(new Vector3(0, 100, near), new Vector3(0, -100, near), Color.green);
+        Debug.DrawLine(new Vector3(100, 3, near), new Vector3(-100, 3, near), Color.green);
+        Debug.DrawLine(new Vector3(0, 3, 100), new Vector3(0, 3, -100), Color.green);
     }
 
     /// <summary>
