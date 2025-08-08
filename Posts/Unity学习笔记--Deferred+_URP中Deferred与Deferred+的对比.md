@@ -805,13 +805,15 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
                 }
                 ``` 
                 ![20250807170652](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250807170652.png)
-              - 计算圆锥外接圆与水平面 Y = planeY的交点sphereTile0， sphereTile1
+              - 计算圆锥外接球与水平面 Y = planeY的交点中X方向上的极值点sphereTile0， sphereTile1
                 ```C#
                 var sphereClipRadius = math.sqrt(rangesq - square(near - lightPositionVS.z));
 
+                // 逐行Tile计算X方向上的极值点sphereTile0, sphereTile1.
                 for (var planeIndex = m_TileYRange.start + 1; planeIndex <= m_TileYRange.end; planeIndex++)
                 {
                   planeY = math.lerp(viewPlaneBottoms[m_ViewIndex], viewPlaneTops[m_ViewIndex], planeIndex * tileScaleInv.y);
+                  // X方向的极值点，即为过相机得到的，圆锥外接球与水平面 Y = planeY的截面圆的切点。
                   GetSphereYPlaneHorizon(lightPositionVS, range, near, sphereClipRadius, planeY, out var sphereTile0, out var sphereTile1);
                   if (SpherePointIsValid(sphereTile0)) planeRange.Expand((short)ViewToTileSpace(sphereTile0).x);
                   if (SpherePointIsValid(sphereTile1)) planeRange.Expand((short)ViewToTileSpace(sphereTile1).x);
@@ -831,59 +833,55 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
                     var planeU = math.normalize(math.float3(0, y, 1));
                     var planeV = math.float3(1, 0, 0);
 
-                    // Calculate the normal of the y-plane. Found from: (0, y, 1) × (1, 0, 0) = (0, 1, -y)
-                    // This is used to represent the plane along with the origin, which is just 0 and thus doesn't show up
-                    // in the calculations.
+                    // (0, y, 1) × (1, 0, 0) = (0, 1, -y) ： 得到平面y-plane (Y = yNear)的法线。
                     var normal = math.normalize(math.float3(0, 1, -y));
 
-                    // We want to first find the circle from the intersection of the y-plane and the sphere.
+                    // 首先寻找光源包围球与平面y-plane相交形成的截面圆。
 
-                    // The shortest distance from the sphere center and the y-plane. The sign determines which side of the plane
-                    // the center is on.
+                    // 因为平面y-plane过原点，光源位置在平面y-plane的法线上的投影，为光源到平面的最短距离。
+                    // 结果的正负号代表圆心位于平面y-plane的不同侧。
                     var signedDistance = math.dot(normal, center);
 
-                    // Unsigned shortest distance from the sphere center to the plane.
+                    // 取signedDistance的绝对值，得到光源到平面y-plane的最短距离。
                     var distanceToPlane = math.abs(signedDistance);
 
-                    // The center of the intersection circle in the y-plane, which is the point on the plane closest to the
-                    // sphere center. I.e. this is at `distanceToPlane` from the center.
+                    // 得到截面圆圆心在平面y-plane坐标系中的2D坐标。 （以planeU，planeV 为底）
                     var centerOnPlane = math.float2(math.dot(center, planeU), math.dot(center, planeV));
 
                     // Distance from origin to the circle center.
+                    // 相机到截面圆圆心的距离。
                     var distanceInPlane = math.length(centerOnPlane);
 
                     // Direction from origin to the circle center.
+                    // 相机到截面圆圆心的方向。
                     var directionPS = centerOnPlane / distanceInPlane;
 
-                    // Calculate the radius of the circle using Pythagoras. We know that any point on the circle is a point on
-                    // the sphere. Thus we can construct a triangle with the sphere center, circle center, and a point on the
-                    // circle. We then want to find its distance to the circle center, as that will be equal to the radius. As
-                    // the point is on the sphere, it must be `sphereRadius` from the sphere center, forming the hypotenuse. The
-                    // other side is between the sphere and circle centers, which we've already calculated to be
-                    // `distanceToPlane`.
+                    // 以球体半径为斜边，根据勾股定理计算得到截面圆的半径。
                     var circleRadius = math.sqrt(square(sphereRadius) - square(distanceToPlane));
 
-                    // Now that we have the circle, we can find the horizon points. Since we've parametrized the plane, we can
-                    // just do this in 2D.
+                    // 计算切点在平面y-plane坐标系中的2D坐标
 
-                    // Any of these conditions will yield NaN due to negative square roots. They are signs that clipping is needed,
-                    // so we fallback on the already calculated values in that case.
+                    // 使用平方避免负值。 
+                    // 当截面圆存在（square(distanceToPlane) > square(sphereRadius)）
+                    // 且过原点存在到截面圆的切线时(square(circleRadius) > square(distanceInPlane))
+                    // 计算切点的位置。
                     if (square(distanceToPlane) <= square(sphereRadius) && square(circleRadius) <= square(distanceInPlane))
                     {
-                        // Distance from origin to circle horizon edge.
+                        // 以原点到截面圆圆心的距离为斜边，根据勾股定理计算原点到切点的距离。
                         var l = math.sqrt(square(distanceInPlane) - square(circleRadius));
 
-                        // Height of circle horizon.
+                        // 根据面积/相似三角形得到三角形在斜边上的高。
                         var h = l * circleRadius / distanceInPlane;
 
-                        // Center of circle horizon.
+                        // c: 两个切点连线的中心在平面y-plane坐标系中的表达。
+                        // (l * h / circleRadius): 根据相似三角形得到以l为斜边，h为高的直角三角形的底边的长度。
                         var c = directionPS * (l * h / circleRadius);
 
-                        // Calculate the horizon points in the plane.
+                        // 从c的坐标沿垂直于directionPS的方向偏移h的长度，得到两个切点的坐标。
                         var leftOnPlane = c + math.float2(directionPS.y, -directionPS.x) * h;
                         var rightOnPlane = c + math.float2(-directionPS.y, directionPS.x) * h;
 
-                        // Transform horizon points to view space and use if not clipped.
+                        // 将切点的坐标转换到相机空间中。并判断是否在视锥体内。
                         var leftCandidate = leftOnPlane.x * planeU + leftOnPlane.y * planeV;
                         if (leftCandidate.z >= near) left = leftCandidate;
 
@@ -891,7 +889,153 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
                         if (rightCandidate.z >= near) right = rightCandidate;
                     }
                 }
-                ``` 
+                ```
+                ![20250808164909](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250808164909.png) 
+        - 如果光源为Point Light: 
+          - 计算光源包围球与水平面 Y = planeY的交点中X方向上的极值点sphereTile0， sphereTile1。 基本过程与“Cone中圆锥外接球与水平面 Y = planeY的相交”类似。
+          > 感觉少算了切点在远平面之外，但包围球的一部分在远平面以内的情况？
+      - 反射探针: 
+        - 将反射探针包围盒上的各个顶点投影到屏幕坐标系中，然后用2D凸包算法构造出一个凸包，然后遍历这个凸包，得到该反射探针影响的Tile区域。
+        ``` C#
+        // The algorithm used here works by clipping all the lines of the cube against the near-plane, and then
+        // projects the resulting points to the view plane. These points are then used to construct a 2D convex
+        // hull, which we can iterate linearly to get the lines on screen making up the cube.
+
+        var reflectionProbe = reflectionProbes[index - lights.Length];
+        var centerWS = (float3)reflectionProbe.bounds.center;
+        var extentsWS = (float3)reflectionProbe.bounds.extents;
+
+        // 反射探针包围盒顶点在相机空间的坐标
+        var points = new NativeArray<float3>(k_CubePoints.Length, Allocator.Temp);
+        // 反射探针包围盒顶点在近平面的投影坐标？
+        var clippedPoints = new NativeArray<float2>(k_CubePoints.Length + k_CubeLineIndices.Length * 3, Allocator.Temp);
+        var clippedPointsCount = 0;
+        var leftmostIndex = 0;
+        for (var i = 0; i < k_CubePoints.Length; i++)
+        {
+          // 将反射探针包围盒顶点在世界空间的坐标转换为相机空间的坐标
+          var point = math.mul(worldToViews[m_ViewIndex], math.float4(centerWS + extentsWS * k_CubePoints[i], 1)).xyz;
+          point.z *= -1;
+          points[i] = point;
+
+          // 如果顶点在没有被近平面剔除， 加入clippedPoints中。 并记录X方向上坐标取值取值最小的顶点。
+          if (point.z >= near)
+          {
+            var clippedPoint = isOrthographic ? point.xy : point.xy/point.z; // 考虑透视投影的情况。
+            var clippedIndex = clippedPointsCount++;
+            clippedPoints[clippedIndex] = clippedPoint;
+            if (clippedPoint.x < clippedPoints[leftmostIndex].x) leftmostIndex = clippedIndex;
+          }
+        }
+
+        // Clip the cube's line segments with the near plane, and add the new vertices to clippedPoints. Only lines
+        // that are clipped will generate new vertices.
+        // 遍历反射探针包围盒的各条边。
+        // 如果与近平面相机相交，计算交点，加入clippedPoints中。 并更新X方向上坐标取值取值最小的顶点。
+        for (var i = 0; i < k_CubeLineIndices.Length; i++)
+        {
+            var indices = k_CubeLineIndices[i];
+            var p0 = points[indices.x];
+            for (var j = 0; j < 3; j++)
+            {
+                var p1 = points[indices[j+1]];
+                // The entire line is in front of the near plane.
+                if (p0.z < near && p1.z < near) continue;
+                // Check whether the line needs clipping.
+                if (p0.z < near || p1.z < near)
+                {
+                    var d = (near - p0.z) / (p1.z - p0.z); //根据相似三角形求交点。
+                    var p = math.lerp(p0, p1, d);
+                    var clippedPoint = isOrthographic ? p.xy : p.xy/p.z;
+                    var clippedIndex = clippedPointsCount++;
+                    clippedPoints[clippedIndex] = clippedPoint;
+                    if (clippedPoint.x < clippedPoints[leftmostIndex].x) leftmostIndex = clippedIndex;
+                }
+            }
+        }
+
+        // 构建凸包
+        // Construct the convex hull. It is formed by the line loop consisting of the points in the array.
+        var hullPoints = new NativeArray<float2>(clippedPointsCount, Allocator.Temp);
+        var hullPointsCount = 0;
+
+        if (clippedPointsCount > 0)
+        {
+            // Start with the leftmost point, as that is guaranteed to be on the hull.
+            // 从X方向上取值最小的点作为凸包的起点。（取极值点为起点可以保证其与其他任意两点的连线为凸）
+            var hullPointIndex = leftmostIndex;
+
+            // Find the remaining hull points until we end up back at the leftmost point.
+            // 使用Gift wrapping的方式构建凸包。
+            do
+            {
+                var hullPoint = clippedPoints[hullPointIndex];
+                ExpandY(math.float3(hullPoint, 1));
+                hullPoints[hullPointsCount++] = hullPoint;
+
+                // Find the endpoint resulting in the leftmost turning line. This line will be a part of the hull.
+                var endpointIndex = 0;
+                var endpointLine = clippedPoints[endpointIndex] - hullPoint;
+                for (var i = 0; i < clippedPointsCount; i++)
+                {
+                    var candidateLine = clippedPoints[i] - hullPoint;
+                    var det = math.determinant(math.float2x2(endpointLine, candidateLine));
+
+                    // Check if point i lies on the left side of the line to the current endpoint, or if it lies
+                    // collinear to the current endpoint but farther away.
+                    if (endpointIndex == hullPointIndex || det > 0 || (det == 0.0f && math.lengthsq(candidateLine) > math.lengthsq(endpointLine)))
+                    {
+                        endpointIndex = i;
+                        endpointLine = candidateLine;
+                    }
+                }
+
+                hullPointIndex = endpointIndex;
+            } while (hullPointIndex != leftmostIndex && hullPointsCount < clippedPointsCount);
+
+            m_TileYRange.Clamp(0, (short)(tileCount.y - 1));
+
+            // Calculate tile plane ranges for sphere.
+            for (var planeIndex = m_TileYRange.start + 1; planeIndex <= m_TileYRange.end; planeIndex++)
+            {
+                var planeRange = InclusiveRange.empty;
+
+                var planeY = math.lerp(viewPlaneBottoms[m_ViewIndex], viewPlaneTops[m_ViewIndex], planeIndex * tileScaleInv.y);
+
+                for (var i = 0; i < hullPointsCount; i++)
+                {
+                    var hp0 = hullPoints[i];
+                    var hp1 = hullPoints[(i + 1) % hullPointsCount];
+
+                    // planeY = hp0 + t * (hp1 - hp0) => planeY - hp0 = t * (hp1 - hp0) => (planeY - hp0) / (hp1 - hp0) = t
+                    var t = (planeY - hp0.y) / (hp1.y - hp0.y);
+                    if (t < 0 || t > 1) continue;
+                    var x = math.lerp(hp0.x, hp1.x, t);
+
+                    var p = math.float3(x, planeY, 1);
+                    var pTS = isOrthographic ? ViewToTileSpaceOrthographic(p) : ViewToTileSpace(p);
+                    planeRange.Expand((short)pTS.x);
+                }
+
+                // Only consider ranges that intersect the tiling extents.
+                // The logic in the below 'if' statement is a simplification of:
+                // !((planeRange.start < 0) && (planeRange.end < 0)) && !((planeRange.start > tileCount.x - 1) && (planeRange.end > tileCount.x - 1))
+                if (((planeRange.start >= 0) || (planeRange.end >= 0)) && ((planeRange.start <= tileCount.x - 1) || (planeRange.end <= tileCount.x - 1)))
+                {
+                    var tileIndex = m_Offset + 1 + planeIndex;
+                    planeRange.Clamp(0, (short)(tileCount.x - 1));
+                    tileRanges[tileIndex] = InclusiveRange.Merge(tileRanges[tileIndex], planeRange);
+                    tileRanges[tileIndex - 1] = InclusiveRange.Merge(tileRanges[tileIndex - 1], planeRange);
+                }
+            }
+
+            tileRanges[m_Offset] = m_TileYRange;
+        }
+
+        hullPoints.Dispose();
+        clippedPoints.Dispose();
+        points.Dispose();
+        ```   
   - `TileRangeExpansionJob`: 将`TilingJob`中计算的结果写入`m_TileMasks`中。 遍历各个Y方向的Tile分区（遍历Tile行）
     - 遍历各个Local lights，记录该Y方向的Tile分区上，各个Local lights在X方向的Tile分区上的影响的范围（itemRanges）。（剔除在该Y方向Tile分区没影响的光源/反射探针）
       ``` C#

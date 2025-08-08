@@ -363,33 +363,66 @@ public class AABB : MonoBehaviour
         var lightOrigin = new Vector3(0, 0, depth);
         var range = 10f;
         var ray = new Vector3(1f, 1f, angle).normalized;
-        var orientation = Quaternion.FromToRotation(Vector3.back, ray);
-        float3 rayValue = new float3(ray);
-        //DrawCircle(lightOrigin, range, Color.yellow, Panel.ZY, Vector3.forward);
 
-        var radius = 6f;
-        var height = 8f;
-        var origin = lightOrigin + ray * height;
-        Debug.DrawLine(lightOrigin, origin, Color.red);
-        DrawCircle(origin, radius, Color.blue, Panel.XY, ray);
-
-        var cameraPosWS = Vector3.zero;
         var near = 4f;
-        var rangesq = square(range);
-        var sphereClipRadius = math.sqrt(rangesq - square(near - lightOrigin.z));
+        var y = 0.75f;
+        var yNear = y * near;
+        var sphereTile0 = Vector3.zero;
+        var sphereTile1 = Vector3.zero;
 
-        var baseUY = math.abs(math.abs(rayValue.x) - 1) < 1e-6f ? math.float3(0, 1, 0) : math.normalize(math.cross(rayValue, math.float3(1, 0, 0)));
-        var baseVY = math.cross(rayValue, baseUY);
+        var planeU = math.normalize(math.float3(0, y, 1));
+        var planeV = math.float3(1, 0, 0);
 
-        var baseRadius = math.sqrt(range * range - height * height);
-        var baseCenter = lightOrigin + ray * height;
+        var normal = math.normalize(math.float3(0, 1, -y));
 
-        GetSphereYPlaneHorizon(lightOrigin, range, near, sphereClipRadius, 0.75f, out var sphereTile0, out var sphereTile1);
+        var signedDistance = math.dot(normal, lightOrigin);
 
-        var test0 = sphereTile0 - new float3(0, 0, depth);
-        DrawCircle(lightOrigin, range, Color.blue, Panel.XY, Vector3.Cross(sphereTile0 - new float3(0, 0, depth), sphereTile1 - new float3(0, 0, depth)));
-        Debug.DrawLine(lightOrigin, sphereTile0, Color.yellow);
-        Debug.DrawLine(lightOrigin, sphereTile1, Color.yellow);
+        var distanceToPlane = math.abs(signedDistance);
+
+        var centerOnPlane = math.float2(math.dot(lightOrigin, planeU), math.dot(lightOrigin, planeV));
+
+        var centerPos = centerOnPlane.x * planeU + centerOnPlane.y * planeV;
+        Debug.DrawLine(centerPos, lightOrigin, Color.darkGreen);
+        Debug.DrawLine(centerPos, centerPos + planeU, Color.white);
+        Debug.DrawLine(centerPos, centerPos + planeV, Color.white);
+
+        var distanceInPlane = math.length(centerOnPlane);
+
+        var directionPS = centerOnPlane / distanceInPlane;
+
+        var circleRadius = math.sqrt(square(range) - square(distanceToPlane));
+        DrawCircle(centerPos, circleRadius, Color.red, Panel.XY, normal);
+
+        if (square(distanceToPlane) <= square(range) && square(circleRadius) <= square(distanceInPlane))
+        {
+            var l = math.sqrt(square(distanceInPlane) - square(circleRadius));
+
+            var h = l * circleRadius / distanceInPlane;
+
+            var c = directionPS * (l * h / circleRadius);
+
+            var leftOnPlane = c + math.float2(directionPS.y, -directionPS.x) * h;
+            var rightOnPlane = c + math.float2(-directionPS.y, directionPS.x) * h;
+
+            var leftCandidate = leftOnPlane.x * planeU + leftOnPlane.y * planeV;
+            if (leftCandidate.z >= near) sphereTile0 = leftCandidate;
+
+            var rightCandidate = rightOnPlane.x * planeU + rightOnPlane.y * planeV;
+            if (rightCandidate.z >= near) sphereTile1 = rightCandidate;
+
+            Debug.DrawLine(sphereTile0, c.x * planeU + c.y * planeV, Color.purple);
+            Debug.DrawLine(sphereTile0, centerPos, Color.plum);
+            Debug.DrawLine(Vector3.zero, centerPos, Color.darkCyan);
+            Debug.DrawLine(centerPos, c.x * planeU + c.y * planeV, Color.black);
+
+            var d = math.float2(directionPS.y, -directionPS.x) * circleRadius;
+            Debug.DrawLine(centerPos + d.x * planeU + d.y * planeV, lightOrigin, Color.lightGreen);
+            Debug.DrawLine(centerPos + d.x * planeU + d.y * planeV, centerPos, Color.greenYellow);
+        }
+
+        DrawCircle(lightOrigin, range, Color.blue, Panel.XY, directionPS.x * planeU + directionPS.y * planeV);
+        Debug.DrawLine(Vector3.zero, sphereTile0, Color.yellow);
+        Debug.DrawLine(Vector3.zero, sphereTile1, Color.yellow);
     }
 
     public void Orth() 
