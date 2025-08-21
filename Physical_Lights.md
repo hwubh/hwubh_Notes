@@ -96,6 +96,12 @@ dynamic的情况需要考虑是否开启了后处理
 
   ---------------
 
-  - < 1
+  - < 1 : unity会将小于0.001的值视为0. -》 URP中，该光源不会被添加到visibleLights里。
   - IBL: 
   - ReflectionProbe 逆曝光 
+
+----------------------
+- HDRP中probe在scene的预览受场景的exposure的影响，但其本身的烘焙不受影响。 -》 URP中的probe不会考虑场景的exposure， ~~而是在使用editor中写死的_MainTex_HDR（textureHDRDecodeValues？）~~ 看shader一共用的也是_Exposure，但这个值应该是在内置的材质中设置的？
+- 使用/1000的reflection probe， 在 HDR Cubemapp Encoding设置为 low/Normal， cubemap会偏亮
+
+--------------------
