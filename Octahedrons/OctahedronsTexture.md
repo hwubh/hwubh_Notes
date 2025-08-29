@@ -21,3 +21,10 @@ Concentric Octahedral mapping: Concentric mapping + Octahedral mapping
 
 - cubeToOctahedral?
 - bakeOctahedral
+- sampleOctahedral
+
+
+------------
+- reflection probe 集合引擎，baked/custom
+- 重要性采样-》 realtime / sky texture
+- RGBM

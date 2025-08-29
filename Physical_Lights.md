@@ -105,3 +105,8 @@ dynamic的情况需要考虑是否开启了后处理
 - 使用/1000的reflection probe， 在 HDR Cubemapp Encoding设置为 low/Normal， cubemap会偏亮
 
 --------------------
+
+- filament: 导入贴图， 二次曝光？
+  - ImageDecoder::decode, if *.exr -> EXRDecoder::create(stream, sourceName) -> new EXRDecoder -> (stream, sourceName) -> EXRDecoder::decode() -> tinyexr::LoadEXRFromMemory
+- _HDR float4 作用？ -> 不同格式的贴图解码时需要的参数，统一存放在_HDR中。 shader中不同格式的贴图可以投用相同的函数进行解码。 
+  - 尝试修改该float4，已知开启editor和调用SetTexture时会触发，但是SetTexture时的修改好像没传进shader中？
