@@ -28,3 +28,9 @@ Concentric Octahedral mapping: Concentric mapping + Octahedral mapping
 - reflection probe 集合引擎，baked/custom
 - 重要性采样-》 realtime / sky texture
 - RGBM
+
+---------
+- Skybox的渲染还没支持: ProbeRenderer::Render
+- reflectionEditor -> //RRR
+- SetReflectionProbeUseOctahedralmap CleanupRenderPipeline 需要吗?
+- OnPreSceneGUICallback 要加个mat
