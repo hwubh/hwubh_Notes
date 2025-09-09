@@ -974,15 +974,19 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
                 hullPoints[hullPointsCount++] = hullPoint;
 
                 // Find the endpoint resulting in the leftmost turning line. This line will be a part of the hull.
+                // 从最左侧的点为起点，尝试构建凸包的第一条边。
                 var endpointIndex = 0;
-                var endpointLine = clippedPoints[endpointIndex] - hullPoint;
+                var endpointLine = clippedPoints[endpointIndex] - hullPoint; // endpointLine 目前选择的第一条边。
                 for (var i = 0; i < clippedPointsCount; i++)
                 {
-                    var candidateLine = clippedPoints[i] - hullPoint;
-                    var det = math.determinant(math.float2x2(endpointLine, candidateLine));
+                    var candidateLine = clippedPoints[i] - hullPoint; // 终点为clippedPoints[i] 的候选边。
+                    var det = math.determinant(math.float2x2(endpointLine, candidateLine)); // 计算endpointLine 和 candidateLine 的叉积。 det > 0，表示 candidateLine 在 endpointLine 的逆时针方向。
 
                     // Check if point i lies on the left side of the line to the current endpoint, or if it lies
                     // collinear to the current endpoint but farther away.
+                    // endpointIndex == hullPointIndex ： 跳过无意义的候选点。
+                    // det > 0 ： 候选边在当前选择边的逆时针方向，更新当前选择边为侯选边。
+                    // (det == 0.0f && math.lengthsq(candidateLine) > math.lengthsq(endpointLine))： 如果侯选边与当前选择边平行，且候选边的长度大于当前选择边的长度，更新当前选择边为侯选边。
                     if (endpointIndex == hullPointIndex || det > 0 || (det == 0.0f && math.lengthsq(candidateLine) > math.lengthsq(endpointLine)))
                     {
                         endpointIndex = i;
@@ -990,7 +994,7 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
                     }
                 }
 
-                hullPointIndex = endpointIndex;
+                hullPointIndex = endpointIndex; // 确定当前选择边为最合适的边，更新当前选择边的起点，寻找下一条边。
             } while (hullPointIndex != leftmostIndex && hullPointsCount < clippedPointsCount);
 
             m_TileYRange.Clamp(0, (short)(tileCount.y - 1));
@@ -1010,11 +1014,11 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
                     // planeY = hp0 + t * (hp1 - hp0) => planeY - hp0 = t * (hp1 - hp0) => (planeY - hp0) / (hp1 - hp0) = t
                     var t = (planeY - hp0.y) / (hp1.y - hp0.y);
                     if (t < 0 || t > 1) continue;
-                    var x = math.lerp(hp0.x, hp1.x, t);
+                    var x = math.lerp(hp0.x, hp1.x, t); // 计算凸包各个边与水平平面的交点
 
                     var p = math.float3(x, planeY, 1);
                     var pTS = isOrthographic ? ViewToTileSpaceOrthographic(p) : ViewToTileSpace(p);
-                    planeRange.Expand((short)pTS.x);
+                    planeRange.Expand((short)pTS.x); // 得到该水平面中凸包的影响的X方向的Tile范围。
                 }
 
                 // Only consider ranges that intersect the tiling extents.

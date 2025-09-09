@@ -36,3 +36,4 @@ Concentric Octahedral mapping: Concentric mapping + Octahedral mapping
 - OnPreSceneGUICallback 要加个mat
 - GetTextureImporterSettingsForOctahedralmap 可能要需要个temp的
 - const float BurleyRoughness = ((float)m) / (float)(context.nr_mips_convolved - 1); -> mipmap每一层级代表的粗糙度受mipmap的层数影响， 好像不太合理？？
+- 不完全根据下一级mipmap进行生成？
