@@ -10,7 +10,7 @@
   - https://blog.csdn.net/seizeF/article/details/92760068
 - 4：Filter： https://www.cnblogs.com/cxrs/archive/2009/10/18/JustAProgramer.html‘
 - 5：Reverse-z: ；在View Space下对应的平面尽量均匀分布，移动视野等过度相对平滑
-  - 浮点数的分布是不均匀，越靠*0的浮点数分布越密集 + 近平面精度较高
+  - 浮点数的分布是不均匀，越靠*0的浮点数分布越密集 + 近平面精度较高 https://developer.nvidia.com/blog/visualizing-depth-precision/
 - 6：Early-Z Culling和HiZ
   - https://blog.csdn.net/yinfourever/article/details/109822330
 - 7：OIT: https://blog.csdn.net/qq_35312463/article/details/115827894
@@ -104,4 +104,6 @@
       return true;
   }
   ```
-- 计算AABB与面的最近距离时，可以通过Dot(extent, Abs(normal))来得到extent在normal的最长投影。原理可以考虑到extent与abs(normal)在各个分量均为整数，其计算结果可以视为extent各个分量的normal上的投影取abs()后的和。
+  - 计算AABB与面的最近距离时，可以通过Dot(extent, Abs(normal))来得到extent在normal的最长投影。原理可以考虑到extent与abs(normal)在各个分量均为整数，其计算结果可以视为extent各个分量的normal上的投影取abs()后的和。
+- 14: 蒙特卡洛积分，重要性采样和GGX： 
+  - 
