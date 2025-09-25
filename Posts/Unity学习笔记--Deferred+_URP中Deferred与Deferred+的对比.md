@@ -103,11 +103,8 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
     ![20250324154543](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250324154543.png) \
     (Z方向上Zbin的划分)。 \
     参考资料: [A Primer On Efficient Rendering Algorithms & Clustered Shading](https://www.aortiz.me/2018/12/21/CG.html#tiled-shading--forward)； [Clustered Deferred and Forward Shading(论文)](https://www.cse.chalmers.se/~uffe/clustered_shading_preprint.pdf); 
-    
-    > 这里对于Z方向的划分方式，感觉像是一种在均分NDC空间，View空间这两种方案之间的权衡？
   - 对反射探针`reflectionProbes`(`renderingData.cullResults.visibleReflectionProbes`)根据 [importance](https://docs.unity3d.com/6000.1/Documentation/ScriptReference/ReflectionProbe-importance.html) 从大到小重新进行排序。
     ```c#
-    // Should probe come after otherProbe?
     static bool IsProbeGreater(VisibleReflectionProbe probe, VisibleReflectionProbe otherProbe)
     {
         return probe.importance < otherProbe.importance ||
