@@ -135,7 +135,7 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
     // Innerloop batch count of 32 is not special, just a handwavy amount to not have too much scheduling overhead nor too little parallelism.
     var lightMinMaxZHandle = lightMinMaxZJob.ScheduleParallel(m_LightCount * viewCount, 32, new JobHandle());
     ``` 
-    先计算光源在View空间中的深度值，然后加上/减去光的范围。
+    - Point light的深度范围： 先计算光源在View空间中的深度值，然后加上/减去光的影响范围, 得到该光源在View空间中影响的深度范围。
     ``` C#
     var lightIndex = index % lights.Length;
     var light = lights[lightIndex];
@@ -148,9 +148,19 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
 
     var minMax = math.float2(originVS.z - light.range, originVS.z + light.range);
     ```
-    - Point light的深度范围： 光源在View空间中的深度值，加上/减去光的范围。
-    - Spot light的深度范围： =圆锥包围盒的范围在Z方向上的投影。 
+    - Spot light的深度范围： 圆锥包围盒的范围在Z方向上的投影。 
     ``` c#
+    var lightIndex = index % lights.Length;
+    var light = lights[lightIndex];
+    var lightToWorld = (float4x4)light.localToWorldMatrix;
+    var originWS = lightToWorld.c3.xyz;
+    var viewIndex = index / lights.Length;
+    var worldToView = worldToViews[viewIndex];
+    var originVS = math.mul(worldToView, math.float4(originWS, 1)).xyz;
+    originVS.z *= -1;
+
+    var minMax = math.float2(originVS.z - light.range, originVS.z + light.range);
+
     if (light.lightType == LightType.Spot)
     {
         // Based on https://iquilezles.org/www/articles/diskbbox/diskbbox.htm
@@ -159,10 +169,10 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
         float coneHeight = light.range * cosAngleA; // 锥体的高度
         float3 spotDirectionWS = lightToWorld.c2.xyz; // 光源朝向(局部空间+Z方向)在世界空间的表达
         var endPointWS = originWS + spotDirectionWS * coneHeight; // 圆锥底面中心在世界空间的表达
-        var endPointVS = math.mul(worldToView, math.float4(endPointWS, 1)).xyz;// 圆锥底面中心在相机空间的表达
+        var endPointVS = math.mul(worldToView, math.float4(endPointWS, 1)).xyz;// 圆锥底面中心在View空间的表达
         endPointVS.z *= -1;
         var angleB = math.PI * 0.5f - angleA;
-        var coneRadius = light.range * cosAngleA * math.sin(angleA) / math.sin(angleB); // math.sin(angleA) / math.sin(angleB) = tan(angleA), 不写math.tan的原因?
+        var coneRadius = light.range * cosAngleA * math.sin(angleA) / math.sin(angleB); // 这里直接写 light.range * math.sin(angleA) 就可以了？
         var a = endPointVS - originVS;
         var e = math.sqrt(1.0f - a.z * a.z / math.dot(a, a));
 
@@ -170,7 +180,11 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
         // `cosAngleA` is multiplied by `coneHeight` to avoid normalizing `a`, which we know has length `coneHeight`
         if (-a.z < coneHeight * cosAngleA) minMax.x = math.min(originVS.z, endPointVS.z - e * coneRadius);
         if (a.z < coneHeight * cosAngleA) minMax.y = math.max(originVS.z, endPointVS.z + e * coneRadius);
-        //算锥体在Z方向的最大/最小值
+        // 计算锥体在Z方向的最大/最小值
+        // a.z < coneHeight * cosAngleA本质是比较锥体的半角与 锥体与Z轴的夹角。
+        // 当a.z ！= coneHeight * cosAngleA时，即 锥体的边不予Z轴平行时， endPointVS.z + e != light.range。因此需要调整minMax的取值，缩小minMax的范围。
+        // 整体来说这个算法是比较保守的，只最少保证了Min， Max中的一个会被更新。而另一个则可能保持较为保守的light.range的范围。
+        // 但这么写的好处是？
     }
     ```
     ![锥体](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250513143954.png)
@@ -184,7 +198,7 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
     };
     var reflectionProbeMinMaxZHandle = reflectionProbeMinMaxZJob.ScheduleParallel(reflectionProbeCount * viewCount, 32, lightMinMaxZHandle);
     ```
-    遍历反射探针的包围盒的各个顶点，计算其在相机空间Z方向的投影。
+    遍历反射探针的包围盒的各个顶点，计算其在相机空间Z方向的投影的最大，最小值。进而得到深度范围。
     ``` c#
     var minMax = math.float2(float.MaxValue, float.MinValue);
     var reflectionProbeIndex = index % reflectionProbes.Length;
@@ -196,6 +210,7 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
     for (var i = 0; i < 8; i++)
     {
         // Convert index to x, y, and z in [-1, 1]
+        // 遍历各个顶点。
         var x = ((i << 1) & 2) - 1;
         var y = (i & 2) - 1;
         var z = ((i >> 1) & 2) - 1;
@@ -208,7 +223,7 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
     minMaxZs[index] = minMax;
     ```
   - `ZBinningJob`： 每128个Zbin分为一个batch，在不同的worker上计算。 计算Local lights对Zbin的影响，填充m_ZBins。 数据结构参见上文 **URP Z-Bin Buffer** 的内容。
-    - 遍历Local lights，从 `minMaxZs`中得到该光源/反射探针影响的深度范围。根据深度范围的最大/最小值计算得到其对应的Zbin，更新这两个Zbin之间所有的Zbin的数据。
+    - 遍历Local lights，从 `minMaxZs`中得到该Local light影响的深度范围。根据深度范围的最大/最小值计算得到其对应的Zbin，更新这两个Zbin之间所有的Zbin的数据。
     ``` C#
     void FillZBins(int binStart, int binEnd, int itemStart, int itemEnd, int headerIndex, int itemOffset, int binOffset)
     {
@@ -233,8 +248,7 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
         }
     }
     ``` 
-  - `viewToViewportScaleBias`: 传入投影矩阵, 计算投影矩阵的偏移。个人感觉XR用的情况比较多？？
-    - 正交时计算非对称正交投影的偏移； 投影计算投影屏幕的偏移参数。
+  - `viewToViewportScaleBias`: 视口变换参数，这里有两个应该是考虑了立体渲染。
     - viewPlaneBottom0 ： 视口偏移的下界
     - viewPlaneTop0 ： 视口偏移的上界
     - viewToViewportScaleBias0 ： 视口的缩放偏置参数；前两项记录scale，后两项记录offset
@@ -259,16 +273,17 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
         );
     }
     ``` 
-  - `TilingJob`: 计算各个Local lights影响的XY平面上的范围。
-    - `rangesPerItem`: 计算每个光源/反射探针在内存中占用的 *InclusiveRange* 结构数量，并确保内存对齐（128 字节为单位），避免伪共享。 
-      - *InclusiveRange*: 记录受该local light影响的Tile在一个维度上的范围。 
-        每个*InclusiveRange*含两个 *short* 成员变量： `start`, `end`。 分别对应范围边缘的Tile的序号。
-      - 每个`rangesPerItem` 有 （1 + m_TileResolution.y）个 *InclusiveRange*。 其中 “1” 的部分记录Y方向上该local light影响的Tile的**行（row）**的范围。 “m_TileResolution.y”的部分，分别代表每一行上，在X方向上该local light影响的Tile的**纵（column）**的范围。 二者重复部分的Tile，则为受该local light影响的Tile。 \
+  - `TilingJob`: 计算各个Local lights在XY平面上的影响的范围。
+    - `rangesPerItem`: 计算每个光源/反射探针在内存中占用的 *InclusiveRange* 结构的数量，并确保内存对齐（128 字节为单位），避免伪共享。 
+      - *InclusiveRange*: 记录受该local light在一个维度上影响的Tile的范围。 
+        每个*InclusiveRange*含两个 *short* 成员变量： `start`, `end`。 分别对应范围边缘的Tile的序号。二者之间的Tile，则为受该local light影响的Tile。 
+      - 每个`rangesPerItem` 有 （1 + m_TileResolution.y）个 *InclusiveRange*。 其中 “1” 的部分记录Y方向上该local light影响的Tile的范围。 “m_TileResolution.y”的部分，每个*InclusiveRange*分别记录每一行上，在X方向上该local light影响的Tile的范围。 二者重叠部分的Tile，则为受该local light影响的Tile。 \
       以下图为例： m_TileResolution = (10, 30), 存在一个Point light在XY平面上投影为红圈。其第“1”的*InclusiveRange*的 `start`, `end`取值为2，29。 第15个*InclusiveRange*代表行14上的范围，`start`, `end`取值为D，H。 ![20250514115345](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250514115345.png)
-    - `tileRanges`： *InclusiveRange*数组， `rangesPerItem`的集合，汇总所有Local lights影响Tile的范围。
+    - `tileRanges`： *InclusiveRange*数组的集合，汇总所有Local lights影响的Tile的范围。
     ```c#
-    // Each light needs 1 range for Y, and a range per row. Align to 128-bytes to avoid false sharing.
+    // rangesPerItem：每个Local ligth 需要 (1 + m_TileResolution.y)个 InclusiveRange。
     var rangesPerItem = AlignByteCount((1 + m_TileResolution.y) * UnsafeUtility.SizeOf<InclusiveRange>(), 128) / UnsafeUtility.SizeOf<InclusiveRange>();
+    // tileRanges ： 一共有需要 (Local lights 的数量 * 每个Local Lights需要的数量) 个 InclusiveRange
     var tileRanges = new NativeArray<InclusiveRange>(rangesPerItem * itemsPerTile * viewCount, Allocator.TempJob);
     ```
     - Execute(): 根据光源类型，相机的投影方式调用不同的函数进行处理，得到Local light影响的Tile的范围。 这里存在Spot/Point，正交/透视两两组合，加上反射探针共5种情况。
@@ -297,7 +312,7 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
     ``` 
       - Spot/Point Lights： 以下例子中使用 光源位置为（0，0，0），light.range为10的point light。光源位置为(0,0,0), 光源方向为(1.0, 1.0, 1.0), light.range为10， 圆锥高度为8， 底面圆半径为6的 spot light。 相机朝向为+Z方向。
       - 正交： 
-        - 计算圆心在XY平面上的投影，更新在`tileRanges`上的取值范围。
+        - 计算圆心在视口空间的坐标及对应Tile序号，更新在`tileRanges`上的取值范围。
           ``` C#
           void TileLightOrthographic(int lightIndex)
           {
@@ -309,7 +324,7 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
               //...
           }
           ```
-          > ExpandOrthographic(float3 positionVS):相机空间 -> 屏幕空间 -> Tile序号。根据Tile序号更新该光源Y方向的取值范围，和Tile所在行的X方向的取值范围。
+          > ExpandOrthographic(float3 positionVS): 从View空间 -> 视口空间（取值范围为[0, 1]） -> Tile序号。根据Tile序号更新该光源Y方向的取值范围，和Tile所在行的X方向的取值范围。
             ``` c#
             /// <summary>
             /// Expands the tile Y range and the X range in the row containing the position.
@@ -327,6 +342,14 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
                     rowXRange.Expand((short)tileX);
                     tileRanges[m_Offset + 1 + tileY] = rowXRange;
                 }
+            }
+
+            /// <summary>
+            /// Project onto Z=1, scale and offset into [0, tileCount]
+            /// </summary>
+            float2 ViewToTileSpaceOrthographic(float3 positionVS)
+            {
+                return (positionVS.xy * viewToViewportScaleBiases[m_ViewIndex].xy + viewToViewportScaleBiases[m_ViewIndex].zw) * tileScale;
             }
             ```
         - 计算光源在相机空间的朝向 
