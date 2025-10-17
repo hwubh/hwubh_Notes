@@ -38,3 +38,197 @@ Concentric Octahedral mapping: Concentric mapping + Octahedral mapping
 - const float BurleyRoughness = ((float)m) / (float)(context.nr_mips_convolved - 1); -> mipmap每一层级代表的粗糙度受mipmap的层数影响， 好像不太合理？？
 - 不完全根据下一级mipmap进行生成？
 - 改了Transfer，需要加宏来控制版本？
+
+-----------
+![20251010144529](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20251010144529.png)
+这里有两个地方可能产生缝的问题，一个是从Mipmap0往下生成高级别的mipmap时，这个可以通过修改自行生成mipmap的方式解决。 另一个球体在采样octahedralmap的时候。 二者本质上都是因为在贴图边缘采样时，如果开启了硬件插值，如果UV不在0~1之间，就会导致采样的结果不合预期。 当UV不在0~1时，应该是根据X=0, X=1, Y=0, Y=1这四条进行映射才对，简单的Repeat/Mirror不能满足需求。 
+![20251010145203](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20251010145203.png)（映射的方式。）
+前者生成mipmap可以通过手动烘培mipmap时，主动映射UV来处理。 （也可以通过padding来处理，但存在较多的精度浪费，因为需要生成的mipmap层级越高，mipmap0需要的padding size越大）
+后者采样octahedralmap时，因为是硬件插值，只能通过添加padding来处理。（应该每层都加个2的padding就行?）
+padding: https://www.shadertoy.com/view/43G3Dd . 一般来说512*512的贴图需要32个像素的padding.
+
+- octahderalMap dir to UV， 需注意得到的UV是不是-1~1的，如果是的话，还得要对UV缩放到0~1间。
+
+式子： 
+```
+ext : 纹理的尺寸
+border ： padding的尺寸
+px ： 是否开启纹理对齐
+
+vec2 border_expand(vec2 uv, float ext, float border, float px) {
+    float I = ext - 2. * border;
+    uv = (uv - border/ext) * ext/I;
+    if (px > .5) uv = (floor(uv * I) + .5) / (I);
+    return uv;
+}
+
+vec2 oct_border(vec2 uv, float ext, float border, float px) {
+    // scale uv to account for borders
+    uv = border_expand(uv, ext, border, px);
+    // flip borders
+    vec2 st = uv;
+    st = (uv.x < 0. || uv.x > 1.) ? vec2(1. - fract(st.x), 1. - st.y) : st;
+    st = (uv.y < 0. || uv.y > 1.) ? vec2(1. - st.x, 1. - fract(st.y)) : st;
+    return st;
+}
+```
+
+        ImgPtrsExt[mip] = (float*)UNITY_MALLOC_NULL(kMemDefault, channels * (mipWidth) * (mipHeight) * sizeof(float));
+
+        if (mipWidth >= 32)
+        {
+            for (int y = 0; y < mipWidth; y++)
+            {
+                for (int x = 0; x < mipHeight; x++)
+                {
+                    float v = y + 0.5f;
+                    float u = x + 0.5f;
+
+                    float realSize = mipWidth - 4.0f;
+                    u = (u - 2.0f) / realSize;
+                    v = (v - 2.0f) / realSize;
+
+                    if (u < 0.0f || u > 1.0f)
+                    {
+                        v = 1.0f - v;
+
+                        if (u < 0.0f)
+                            u = -u;
+                        if (u > 1.0f)
+                            u = 2.0f - u;
+                    }
+
+                    if (v < 0.0f || v > 1.0f)
+                    {
+                        u = 1.0f - u;
+
+                        if (v < 0.0f)
+                            v = -v;
+                        if (v > 1.0f)
+                            v = 2.0f - v;
+                    }
+
+                    int u0 = std::min(mipWidth - 1.0f, std::max(0.0f, u * mipWidth));
+                    int v0 = std::min(mipHeight - 1.0f, std::max(0.0f, v * mipHeight));
+
+                    const int idx_src = v0 * mipWidth + u0;
+                    const int idx_dst = y * mipWidth + x;
+
+                    for (int c = 0; c < channels; c++)
+                    {
+                        if (mip == 0)
+                            (ImgPtrsExt[mip])[channels * idx_dst + c] = (ImgPtrsSrc[0])[channels * idx_src + c];
+                        else
+                            (ImgPtrsExt[mip])[channels * idx_dst + c] = (ImgPtrsDst[0][mip])[channels * idx_src + c];
+                    }
+                }
+            }
+        }
+
+
+---------------
+
+static void DoSinglePixConvolveSIMDOctahedralMap(ConvBrdfContext& context, float* ResPtr, const unsigned short PermTableAptr[], const unsigned short PermTableBptr[], const int NrRaysIn,
+const int offs, const float fMipOffs, const float mipLim, const float fN, const float RealRoughness,
+const float vX[3], const float vY[3], const float dir[3], const float PaddingSize)
+{
+using namespace math;
+float4 vResult[] = { 0.0f, 0.0f, 0.0f, 0.0f };
+const float RealRoughnessSquared = RealRoughness * RealRoughness;
+const float4 scale = 1.0f / ((float)(CONV_RAND_MAX + 1));
+const int NrRays = NrRaysIn & (~0x3);     // force to multiple of 4 (though this should already be the case)
+const int NrIts = NrRays / 4;
+
+// 预计算八面体映射校正因子
+const float octahedralNormalization = 4.0f / (float)M_PI; // 八面体映射的归一化常数
+
+for (int Q = 0; Q < NrIts; Q++)
+{
+int i[4], J[4];
+for (int q = 0; q < 4; q++)
+{
+// Use N-rooks to distribute N samples across a 2D space
+int I0 = 4 * Q + q;
+i[q] = PermTableBptr[I0];       // think of PermTableBptr[] as an inverse permutation table going from I --> i
+DebugAssertMsg(IsPowerOfTwo(NrRays) && NrRays > 0, "Convolve: ray count should be power of two");
+J[q] = PermTableAptr[(offs + i[q]) & (NrRays - 1)];
+}
+int jitteri[4], jitterj[4];
+for (int q = 0; q < 4; q++)
+{
+const int jit_idx = (i[q] + offs) & (LENGTH_RAND_TABLE - 1);
+jitteri[q] = context.RandAptr[jit_idx];
+jitterj[q] = context.RandBptr[jit_idx];
+}
+int4 tmpA = int4(jitteri[0], jitteri[1], jitteri[2], jitteri[3]);
+int4 tmpB = int4(jitterj[0], jitterj[1], jitterj[2], jitterj[3]);
+float4 vIfloat = convert_float4(int4(4 * Q) + int4(0, 1, 2, 3));
+float4 vJfloat = convert_float4(int4(J[0], J[1], J[2], J[3]));
+float4 vTheta = (2.0f * ((float)M_PI) / NrRays) * (vIfloat + (scale * convert_float4(tmpA)));
+float4 vProb = (1.0f / NrRays) * (vJfloat + (scale * convert_float4(tmpB)));
+
+// 使用更稳定的采样方法
+const float K = RealRoughnessSquared;
+const float4 si = sqrt(vProb / (K + (1.0f - K) * vProb));
+const float4 co = sqrt(max(0.0f, 1.0f - si * si));
+const float4 cotheta = cos(vTheta);
+const float4 sitheta = sin(vTheta);
+const float4 vx = cotheta * co;
+const float4 vy = sitheta * co;
+const float4 vz = si;
+
+float4 vDir[3];
+for (int r = 0; r < 3; r++)
+    vDir[r] = vx * vX[r] + vy * vY[r] + vz * dir[r];
+
+// 计算PDF并应用八面体映射校正
+float4 tmp = (si * si) * (RealRoughnessSquared - 1.0f) + 1.0f;
+float4 pdf = (si * RealRoughnessSquared) / (((float)M_PI) * tmp * tmp);
+
+// 八面体映射特有的校正
+float4 octahedralWeight = CalculateOctahedralWeight(vDir);
+pdf *= octahedralWeight;
+
+const float4 adx = abs(vDir[0]);
+const float4 ady = abs(vDir[1]);
+const float4 adz = abs(vDir[2]);
+
+// 改进的LOD计算，考虑八面体映射特性
+const float4 maxabscomp = max(max(adx, ady), adz);
+// 添加八面体映射缩放因子
+float4 octahedralScale = 1.0f + 0.2f * (maxabscomp - min(min(adx, ady), adz)); // 简化的拉伸校正
+float4 Lod = fMipOffs - 0.5f * log2e(max(float4(FLT_EPSILON), pdf * maxabscomp * maxabscomp * maxabscomp * octahedralScale));
+Lod = max(float4(mipLim), Lod);
+
+float4 vSample[4];
+OctahedralMapSampleSIMD(vSample, context.ImgPtrsExt[0], context.dimSrc, context.numChannels, context.numSrcMips, vDir, Lod, PaddingSize);
+
+// 应用额外的权重校正
+float4 finalWeight = octahedralWeight / (float)NrRays;
+for (int c = 0; c < context.numChannels; c++)
+    vResult[c] += vSample[c] * finalWeight;
+}
+
+// 归一化结果
+for (int c = 0; c < context.numChannels; c++)
+    ResPtr[c] = dot(1.0f, vResult[c]);
+}
+
+// 添加辅助函数用于计算八面体映射权重
+float4 CalculateOctahedralWeight(float4 vDir[3])
+{
+    // 计算八面体映射的雅可比行列式校正
+    const float4 absX = abs(vDir[0]);
+    const float4 absY = abs(vDir[1]);
+    const float4 absZ = abs(vDir[2]);
+    
+    // 八面体映射的拉伸校正因子
+    const float4 sum = absX + absY + absZ;
+    const float4 weight = sum * sum * sum; // 立方体到八面体映射的雅可比校正
+    
+    return weight;
+}
+
+
+-----------
+

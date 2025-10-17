@@ -331,7 +331,6 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
             /// </summary>
             void ExpandOrthographic(float3 positionVS)
             {
-                // var positionTS = math.clamp(ViewToTileSpace(positionVS), 0, tileCount - 1);
                 var positionTS = ViewToTileSpaceOrthographic(positionVS);
                 var tileY = (int)positionTS.y;
                 var tileX = (int)positionTS.x;
