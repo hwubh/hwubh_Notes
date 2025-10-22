@@ -312,6 +312,33 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
     ``` 
       - Spot/Point Lights： 以下例子中使用 光源位置为（0，0，0），light.range为10的point light。光源位置为(0,0,0), 光源方向为(1.0, 1.0, 1.0), light.range为10， 圆锥高度为8， 底面圆半径为6的 spot light。 相机朝向为+Z方向。
       - 正交： 
+        - 更新影响的Tile范围： `ViewToTileSpaceOrthographic` 将View空间的坐标映射到 Z = 1， XY取值为[0 , tileCount]的ViewPlane上，然后得到坐标所在的Tile的XY序号。 `ExpandOrthographic(float3 positionVS)` 根据Tile序号更新该光源Y方向的Tile取值范围，和该Tile所在行的X方向的Tile取值范围。
+          ``` C# 
+          /// <summary>
+          /// Expands the tile Y range and the X range in the row containing the position.
+          /// </summary>
+          void ExpandOrthographic(float3 positionVS)
+          {
+              var positionTS = ViewToTileSpaceOrthographic(positionVS);
+              var tileY = (int)positionTS.y;
+              var tileX = (int)positionTS.x;
+              m_TileYRange.Expand((short)math.clamp(tileY, 0, tileCount.y - 1)); // 更新Y方向的Tile取值范围
+              if (tileY >= 0 && tileY < tileCount.y && tileX >= 0 && tileX < tileCount.x)
+              {
+                  var rowXRange = tileRanges[m_Offset + 1 + tileY];
+                  rowXRange.Expand((short)tileX); // 更新X方向的Tile取值范围
+                  tileRanges[m_Offset + 1 + tileY] = rowXRange;
+              }
+          }
+
+          /// <summary>
+          /// Project onto Z=1, scale and offset into [0, tileCount]
+          /// </summary>
+          float2 ViewToTileSpaceOrthographic(float3 positionVS)
+          {
+              return (positionVS.xy * viewToViewportScaleBiases[m_ViewIndex].xy + viewToViewportScaleBiases[m_ViewIndex].zw) * tileScale;
+          }
+          ``` 
         - 计算圆心在视口空间的坐标及对应Tile序号，更新在`tileRanges`上的取值范围。
           ``` C#
           void TileLightOrthographic(int lightIndex)
@@ -324,37 +351,10 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
               //...
           }
           ```
-          > ExpandOrthographic(float3 positionVS): 从View空间 -> 视口空间（取值范围为[0, 1]） -> Tile序号。根据Tile序号更新该光源Y方向的取值范围，和Tile所在行的X方向的取值范围。
-            ``` c#
-            /// <summary>
-            /// Expands the tile Y range and the X range in the row containing the position.
-            /// </summary>
-            void ExpandOrthographic(float3 positionVS)
-            {
-                var positionTS = ViewToTileSpaceOrthographic(positionVS);
-                var tileY = (int)positionTS.y;
-                var tileX = (int)positionTS.x;
-                m_TileYRange.Expand((short)math.clamp(tileY, 0, tileCount.y - 1));
-                if (tileY >= 0 && tileY < tileCount.y && tileX >= 0 && tileX < tileCount.x)
-                {
-                    var rowXRange = tileRanges[m_Offset + 1 + tileY];
-                    rowXRange.Expand((short)tileX);
-                    tileRanges[m_Offset + 1 + tileY] = rowXRange;
-                }
-            }
-
-            /// <summary>
-            /// Project onto Z=1, scale and offset into [0, tileCount]
-            /// </summary>
-            float2 ViewToTileSpaceOrthographic(float3 positionVS)
-            {
-                return (positionVS.xy * viewToViewportScaleBiases[m_ViewIndex].xy + viewToViewportScaleBiases[m_ViewIndex].zw) * tileScale;
-            }
-            ```
         - 计算光源在相机空间的朝向 
           ``` C#
           var lightDirVS = math.mul(worldToViews[m_ViewIndex], math.float4(lightToWorld.c2.xyz, 0)).xyz;
-          lightDirVS.z *= -1;
+          lightDirVS.z *= -1; // 世界空间与View空间的Z轴朝向相反。世界坐标指向+Z, View空间指向-Z
           lightDirVS = math.normalize(lightDirVS);
           ```
         - 计算光源的包围球在XY平面上的圆形投影，根据light.range得到其在XY方向的四个极值点。
@@ -484,7 +484,7 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
               ``` 
               ![20250522155808](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250522155808.png)
       - 透视：
-        - 计算圆心在XY平面上的投影，更新在`tileRanges`上的取值范围。
+        - 计算圆心在XY平面上的投影，更新`tileRanges`上的取值范围。
           ``` c#
           void TileLight(int lightIndex)
           {

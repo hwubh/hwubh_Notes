@@ -8,12 +8,72 @@ using UnityEditor.Rendering.LookDev;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.UIElements;
+using static AABB;
 using static TMPro.SpriteAssetUtilities.TexturePacker_JsonArray;
 using static UnityEngine.UI.Image;
 
 [ExecuteInEditMode]
 public class AABB : MonoBehaviour
 {
+    public enum ProjectionMode
+    {
+        Orthographic,
+        Perspective
+    }
+
+    public enum lightType
+    {
+        Point,
+        Spot,
+        ReflectionProbe
+    }
+
+    public ProjectionMode projectionMode = ProjectionMode.Orthographic;
+    public lightType LightType = lightType.Point;
+
+    void DrawLights(ProjectionMode projectionMode, lightType LightType) 
+    {
+        switch (projectionMode)
+        {
+            case ProjectionMode.Orthographic:
+                {
+                    switch (LightType)
+                    {
+                        case lightType.Point:
+                            Orth();
+                            break;
+                        case lightType.Spot:
+                            break;
+                        case lightType.ReflectionProbe:
+                            break;
+                    }
+                }
+                break;
+            case ProjectionMode.Perspective:
+                {
+                    switch (LightType)
+                    {
+                        case lightType.Point:
+                            break;
+                        case lightType.Spot:
+                            break;
+                        case lightType.ReflectionProbe:
+                            break;
+                    }
+                }
+                break;
+        }
+
+    }
+
+    // Update is called once per frame
+    void Update()
+    {
+        //DrawFrustum();
+        DrawLights(projectionMode, LightType);
+        //Pers();
+    }
+
     public float angle = 0f;
     public float test = 0f;
     public float depth = 14f;
@@ -25,13 +85,6 @@ public class AABB : MonoBehaviour
     }
 
     static float square(float x) => x * x;
-
-    // Update is called once per frame
-    void Update()
-    {
-        DrawFrustum();
-        Pers();
-    }
 
     static bool GetCircleClipPoints(float3 circleCenter, float3 circleNormal, float circleRadius, float near, out float3 p0, out float3 p1)
     {

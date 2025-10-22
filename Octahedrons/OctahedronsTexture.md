@@ -231,4 +231,117 @@ float4 CalculateOctahedralWeight(float4 vDir[3])
 
 
 -----------
+Shader "Hidden/OctahedralConversionWithPadding"
+{
+    Properties
+    {
+        _MainTex ("Cubemap", Cube) = "" {}
+    }
+    SubShader
+    {
+        Tags { "RenderType"="Opaque" "RenderPipeline" = "UniversalPipeline" }
+        LOD 100
+        
+        Pass
+        {
+            Name "OctahedralConversionWithPadding"
+            
+            HLSLPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+            
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            
+            TEXTURECUBE(_MainTex);
+            SAMPLER(sampler_MainTex);
+            
+            struct Attributes
+            {
+                float4 positionOS : POSITION;
+                float2 uv : TEXCOORD0;
+            };
+            
+            struct Varyings
+            {
+                float4 positionHCS : SV_POSITION;
+                float2 uv : TEXCOORD0;
+            };
 
+            uniform float _MipLevel;
+            uniform float _TextureSize;
+            uniform uint _PaddingSize;
+            SamplerState sampler_LinearRepeat;
+
+            Varyings vert(Attributes input)
+            {
+                Varyings output;
+
+                output.positionHCS = TransformObjectToHClip(input.positionOS);
+
+                // float scalePadding = (_TextureSize + _PaddingSize) / _TextureSize;
+                // float offsetPadding = (_PaddingSize / 2.0) / (_TextureSize + _PaddingSize);
+                // float2 octUV = (input.uv - offsetPadding) * scalePadding;
+
+                // if (octUV.x < 0.0f || octUV.x > 1.0f)
+                // {
+                //     octUV.y = 1.0f - octUV.y;
+
+                //     if (octUV.x < 0.0f)
+                //         octUV.x = -octUV.x;
+                //     if (octUV.x > 1.0f)
+                //         octUV.x = 2.0f - octUV.x;
+                // }
+
+                // if (octUV.y < 0.0f || octUV.y > 1.0f)
+                // {
+                //     octUV.x = 1.0f - octUV.x;
+
+                //     if (octUV.y < 0.0f)
+                //         octUV.y = -octUV.y;
+                //     if (octUV.y > 1.0f)
+                //         octUV.y = 2.0f - octUV.y;
+                // }
+
+                output.uv = input.uv;
+
+                return output;
+            }
+            
+            float4 frag(Varyings input) : SV_Target
+            {
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+                //float2 uv = RepeatOctahedralUV(input.uv.x, input.uv.y);
+                // if (input.uv.x < 0.0f || input.uv.x > 1.0f)
+                //     return half4(1,0,0,1);
+                float scalePadding = (_TextureSize + _PaddingSize) / _TextureSize;
+                float offsetPadding = (_PaddingSize / 2.0) / (_TextureSize + _PaddingSize);
+                float2 octUV = (input.uv - offsetPadding) * scalePadding;
+                if (octUV.x < 0.0f || octUV.x > 1.0f)
+                {
+                    octUV.y = 1.0f - octUV.y;
+
+                    if (octUV.x < 0.0f)
+                        octUV.x = -octUV.x;
+                    if (octUV.x > 1.0f)
+                        octUV.x = 2.0f - octUV.x;
+                }
+
+                if (octUV.y < 0.0f || octUV.y > 1.0f)
+                {
+                    octUV.x = 1.0f - octUV.x;
+
+                    if (octUV.y < 0.0f)
+                        octUV.y = -octUV.y;
+                    if (octUV.y > 1.0f)
+                        octUV.y = 2.0f - octUV.y;
+                }
+                float3 dir = UnpackNormalOctQuadEncode(2.0f * octUV - 1.0f);
+                return SAMPLE_TEXTURECUBE_LOD(_MainTex, sampler_MainTex, dir, _MipLevel);
+            }
+            ENDHLSL
+        }
+    }
+    
+    FallBack "Hidden/Universal Render Pipeline/FallbackError"
+}
+在顶点着色器中做UV变换好像不太行，得放在片元才是正确的。
