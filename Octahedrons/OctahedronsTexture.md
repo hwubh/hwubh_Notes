@@ -345,3 +345,45 @@ Shader "Hidden/OctahedralConversionWithPadding"
     FallBack "Hidden/Universal Render Pipeline/FallbackError"
 }
 在顶点着色器中做UV变换好像不太行，得放在片元才是正确的。
+
+--------
+float srcU = U * (curDim - 1);
+float srcV = V * (curDim - 1);
+
+int x0 = (int)floorf(srcU);
+int y0 = (int)floorf(srcV);
+int x1 = x0 + 1;
+int y1 = y0 + 1;
+
+x0 = std::max(0, std::min(x0, curDim - 1));
+x1 = std::max(0, std::min(x1, curDim - 1));
+y0 = std::max(0, std::min(y0, curDim - 1));
+y1 = std::max(0, std::min(y1, curDim - 1));
+
+float fx = srcU - x0;
+float fy = srcV - y0;
+
+for (int c = 0; c < nr_channels; c++)
+{
+    float p00 = (ImgPtrs_mid[faceIndex][m])[nr_channels * GenImgIdx(x0, y0, curDim) + c];
+    float p01 = (ImgPtrs_mid[faceIndex][m])[nr_channels * GenImgIdx(x0, y1, curDim) + c];
+    float p10 = (ImgPtrs_mid[faceIndex][m])[nr_channels * GenImgIdx(x1, y0, curDim) + c];
+    float p11 = (ImgPtrs_mid[faceIndex][m])[nr_channels * GenImgIdx(x1, y1, curDim) + c];
+
+    float interpolated =
+        p00 * (1.0f - fx) * (1.0f - fy) +
+        p10 * fx * (1.0f - fy) +
+        p01 * (1.0f - fx) * fy +
+        p11 * fx * fy;
+
+    (ImgPtrs_dst[m])[nr_channels * idx_dst + c] = interpolated;
+}
+
+--------------
+
+cube to octa 时图像上下颠倒的问题： 
+- 使用OpenGLES: 在生成每一级octahedralmap的 mipmap时，会触发 Yflip, imageFilter::Blit()中src R的YFIP计算为false， dst Tex的UVYTop2Botton = false， ReadbackImage / CopyTexture 不参与翻转Y坐标， shader中不满足 UNITY_UV_STARTS_AT_TOP， 不翻转Y坐标, RT::SetActive中SetInvertProjectionMatrix = false, RT::SetActive中dst Tex的SetUVYIsFromTopToBottom = true, UpdateYFlipState 中 dst Tex的SetUVYIsFromTopToBottom = false;
+- 在生成cubemap的每个面时，会触发Yflip。 
+> imageFilter::Blit 发生Y反转的条件： 源纹理本身倒置且满足基本条件（VR未启用，不是RT，不是Y坐标从上到下的坐标系（DX11,12;Vulkan；Metal；PS4/5））； 或渲染到Game View且源纹理UV的Y方向为从底部到顶部； 或源纹理UV的Y方向为顶部到底部
+
+- 使用DX11时， 在生成每一级octahedralmap的 mipmap时，不会触发 Yflip， imageFilter::Blit()中未发生Y反转，dst tex的 UVYTop2Botton = false， shader中满足 UNITY_UV_STARTS_AT_TOP，会翻转Y坐标。
