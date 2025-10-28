@@ -411,6 +411,27 @@ public class AABB : MonoBehaviour
         }
     }
 
+    public void Orth_LightRange() 
+    {
+        var lightOrigin = Vector3.zero;
+        var range = 10f;
+        var ray = new Vector3(1f, 1f, 1f).normalized;
+        var orientation = Quaternion.FromToRotation(Vector3.back, ray);
+        float3 rayValue = new float3(ray);
+        DrawCircle(lightOrigin, range, Color.yellow, Panel.XY, Vector3.forward);
+
+        var radius = 6f;
+        var height = 8f;
+        var origin = lightOrigin + ray * height;
+        var originFloat3 = new float3(origin);
+        Debug.DrawLine(lightOrigin, origin, Color.red);
+        DrawCircle(origin, radius, Color.blue, Panel.XY, ray);
+        Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(radius, 0, 0), Color.blue);
+        Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(-radius, 0, 0), Color.blue);
+        Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(0, radius, 0), Color.blue);
+        Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(0, -radius, 0), Color.blue);
+    }
+
     public void Pers()
     {
         var lightOrigin = new Vector3(0, 0, depth);
@@ -482,7 +503,7 @@ public class AABB : MonoBehaviour
     {
         var lightOrigin = Vector3.zero;
         var range = 10f;
-        var ray = new Vector3(1f, 1f, angle).normalized;
+        var ray = new Vector3(1f, 1f, 1f).normalized;
         var orientation = Quaternion.FromToRotation(Vector3.back, ray);
         float3 rayValue = new float3(ray);
         DrawCircle(lightOrigin, range, Color.yellow, Panel.XY, Vector3.forward);
@@ -493,10 +514,10 @@ public class AABB : MonoBehaviour
         var originFloat3 = new float3(origin);
         Debug.DrawLine(lightOrigin, origin, Color.red);
         DrawCircle(origin, radius, Color.blue, Panel.XY, ray);
-        //Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(radius, 0, 0), Color.blue);
-        //Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(-radius, 0, 0), Color.blue);
-        //Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(0, radius, 0), Color.blue);
-        //Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(0, -radius, 0), Color.blue);
+        Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(radius, 0, 0), Color.blue);
+        Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(-radius, 0, 0), Color.blue);
+        Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(0, radius, 0), Color.blue);
+        Debug.DrawLine(lightOrigin, lightOrigin + ray * height + orientation * new Vector3(0, -radius, 0), Color.blue);
 
         //var planeY = test;
         //Debug.DrawLine(new Vector3(-100, planeY, 0), new Vector3(100, planeY, 0), Color.black);

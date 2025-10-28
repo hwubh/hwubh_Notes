@@ -112,3 +112,4 @@ dynamic的情况需要考虑是否开启了后处理
   - 尝试修改该float4，已知开启editor和调用SetTexture时会触发，但是SetTexture时的修改好像没传进shader中？
 - DecodeLightmap 和 DecodeHDREnvironment 本質是等价的，只不过DecodeLightmap中 decodeInstructions是在shader对解码参数decodeInstructions进行设置。 而 DecodeHDREnvironment的解码参数 （**TEX_HAR）则是在C++中进行的定义。
 - 在Graphics::Blit 中调用``(MainTex)**_HDR`` 可能存在对应的数值没有上传到GPU的情况。可以手动mat.SetVector("any name",mat.GetVector("(MainTex)**_HDR"))进行设置。
+- unity中不是Cubemap/lightmap的HDR图统一使用RGBM进行存储？ 前者各自受project settings中的影响
