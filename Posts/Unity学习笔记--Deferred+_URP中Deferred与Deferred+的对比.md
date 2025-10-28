@@ -392,7 +392,7 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
             var circleCenter = lightPosVS + lightDirVS * coneHeight;
             var circleRadius = math.sqrt(rangeSq - coneHeightSq);
             var circleRadiusSq = square(circleRadius);
-            var circleUp = math.normalize(math.float3(0, 1, 0) - lightDirVS * lightDirVS.y); （circleUp 为 归一化的Y坐标轴单位向量在lightDirVS方向的垂直分量，即在底面上的投影。）
+            var circleUp = math.normalize(math.float3(0, 1, 0) - lightDirVS * lightDirVS.y); （circleUp 为 归一化的Y坐标轴单位向量在lightDirVS方向的垂直分量，即在底面圆上的投影。）
             var circleRight = math.normalize(math.float3(1, 0, 0) - lightDirVS * lightDirVS.x);
             var circleBoundY0 = circleCenter - circleUp * circleRadius;
             var circleBoundY1 = circleCenter + circleUp * circleRadius;
@@ -471,7 +471,7 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
               // Circle
               if (planeY >= circleBoundY0.y && planeY <= circleBoundY1.y)
               {
-                  var intersectionDistance = (planeY - circleCenter.y) / circleUp.y; //根据Y
+                  var intersectionDistance = (planeY - circleCenter.y) / circleUp.y;
                   var closestPointX = circleCenter.x + intersectionDistance * circleUp.x;
                   var intersectionDirX = -lightDirVS.z / math.length(math.float3(-lightDirVS.z, 0, lightDirVS.x));
                   var sideDistance = math.sqrt(square(circleRadius) - square(intersectionDistance));

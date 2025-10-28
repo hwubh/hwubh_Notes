@@ -387,3 +387,5 @@ cube to octa 时图像上下颠倒的问题：
 > imageFilter::Blit 发生Y反转的条件： 源纹理本身倒置且满足基本条件（VR未启用，不是RT，不是Y坐标从上到下的坐标系（DX11,12;Vulkan；Metal；PS4/5））； 或渲染到Game View且源纹理UV的Y方向为从底部到顶部； 或源纹理UV的Y方向为顶部到底部
 
 - 使用DX11时， 在生成每一级octahedralmap的 mipmap时，不会触发 Yflip， imageFilter::Blit()中未发生Y反转，dst tex的 UVYTop2Botton = false， shader中满足 UNITY_UV_STARTS_AT_TOP，会翻转Y坐标。
+
+这里无论是DX 还是 OpenGLES，ImageFilters::Blit都会发生翻转？
