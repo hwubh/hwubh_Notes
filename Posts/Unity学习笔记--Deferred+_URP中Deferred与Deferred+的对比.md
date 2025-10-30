@@ -483,32 +483,8 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
               ``` 
               ![20250522155808](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250522155808.png)
       - 透视：
-        - 计算圆心在XY平面上的投影，更新`tileRanges`上的取值范围。
+        - 更新影响的Tile范围: 思路与正交投影的方式类似。相机空间 -> 屏幕空间 -> Tile序号。
           ``` c#
-          void TileLight(int lightIndex)
-          {
-            var light = lights[lightIndex];
-            if (light.lightType != LightType.Point && light.lightType != LightType.Spot)
-            {
-                return;
-            }
-
-            var lightToWorld = (float4x4)light.localToWorldMatrix;
-            var lightPositionVS = math.mul(worldToViews[m_ViewIndex], math.float4(lightToWorld.c3.xyz, 1)).xyz;
-            lightPositionVS.z *= -1;
-            if (lightPositionVS.z >= near) ExpandY(lightPositionVS);
-          }
-
-          /// <summary>
-          /// Project onto Z=1, scale and offset into [0, tileCount]
-          /// </summary>
-          float2 ViewToTileSpaceOrthographic(float3 positionVS)
-          {
-              return (positionVS.xy * viewToViewportScaleBiases[m_ViewIndex].xy + viewToViewportScaleBiases[m_ViewIndex].zw) * tileScale;
-          }
-          ``` 
-          > 思路与正交投影的方式类似。相机空间 -> 屏幕空间 -> Tile序号。
-          ``` C#
           /// <summary>
           /// Expands the tile Y range and the X range in the row containing the position.
           /// </summary>
@@ -534,7 +510,23 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
           {
               return (positionVS.xy / positionVS.z * viewToViewportScaleBiases[m_ViewIndex].xy + viewToViewportScaleBiases[m_ViewIndex].zw) * tileScale;
           }
-          ```
+          ``` 
+        - 计算圆心在XY平面上的投影，更新`tileRanges`上的取值范围。
+          ``` c#
+          void TileLight(int lightIndex)
+          {
+            var light = lights[lightIndex];
+            if (light.lightType != LightType.Point && light.lightType != LightType.Spot)
+            {
+                return;
+            }
+
+            var lightToWorld = (float4x4)light.localToWorldMatrix;
+            var lightPositionVS = math.mul(worldToViews[m_ViewIndex], math.float4(lightToWorld.c3.xyz, 1)).xyz;
+            lightPositionVS.z *= -1;
+            if (lightPositionVS.z >= near) ExpandY(lightPositionVS);
+          }
+          ``` 
         - 计算光源的包围球在XY平面上的圆形投影。 因为透视投影下，相机X，Y方向上可能因为aspect的取值而存在FOV不同的情况。因此需要将包围球分别投影在XZ, YZ平面上，分别进行计算X，Y方向上的极值点`sphereBoundY0/Y1/X0/X1`。
           ``` C#
           var halfAngle = math.radians(light.spotAngle * 0.5f);
@@ -575,7 +567,7 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
           if (SpherePointIsValid(sphereBoundX0)) ExpandY(sphereBoundX0);
           if (SpherePointIsValid(sphereBoundX1)) ExpandY(sphereBoundX1);
           ``` 
-          - 这里以投影到YZ平面上为例: 计算相机与投影圆的切线，切点。 需要考虑以下两种情况，
+          - 这里以投影到YZ平面上为例: 计算相机与投影圆的切线，切点。 需要考虑球体与近平面相交的情况。
             ``` C#
             /// <summary>
             /// Finds the two horizon points seen from (0, 0) of a sphere projected onto either XZ or YZ. Takes clipping into account.
