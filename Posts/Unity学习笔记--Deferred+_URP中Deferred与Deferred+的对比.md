@@ -567,7 +567,7 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
           if (SpherePointIsValid(sphereBoundX0)) ExpandY(sphereBoundX0);
           if (SpherePointIsValid(sphereBoundX1)) ExpandY(sphereBoundX1);
           ``` 
-          - 这里以投影到YZ平面上为例: 计算相机与投影圆的切线，切点。 需要考虑球体与近平面相交的情况。
+          - 这里以投影到YZ平面上为例: 计算相机与投影圆的切线，切点。 需要考虑球体与近平面相交的情况。比较过相机原点的直线在投影圆的切点(c0, c1), 与投影圆与近平面的交点(p0, p1), 选择在垂直Z方向上距离较大的点（如YZ平面上比较Y方向）。
             ``` C#
             /// <summary>
             /// Finds the two horizon points seen from (0, 0) of a sphere projected onto either XZ or YZ. Takes clipping into account.
