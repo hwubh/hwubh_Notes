@@ -389,3 +389,6 @@ cube to octa 时图像上下颠倒的问题：
 - 使用DX11时， 在生成每一级octahedralmap的 mipmap时，不会触发 Yflip， imageFilter::Blit()中未发生Y反转，dst tex的 UVYTop2Botton = false， shader中满足 UNITY_UV_STARTS_AT_TOP，会翻转Y坐标。
 
 这里无论是DX 还是 OpenGLES，ImageFilters::Blit都会发生翻转？
+
+-------
+可以使用compute shader 来处理Cube2Octahedron。但是SSBO数量>7时可以把各个mipmap放在一个Drawcall里？
