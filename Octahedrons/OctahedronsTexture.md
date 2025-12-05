@@ -392,3 +392,14 @@ cube to octa 时图像上下颠倒的问题：
 
 -------
 可以使用compute shader 来处理Cube2Octahedron。但是SSBO数量>7时可以把各个mipmap放在一个Drawcall里？
+
+-----
+球体上的均匀分布： 斐波那契螺旋分布
+
+-----
+
+urp 改默认keyword:
+-  UniversalRenderPipelineAsset：：#if UNITY_EDITOR // multi_compile_fragment _ _REFLECTION_PROBE_ROTATED
+        [ShaderKeywordFilter.SelectOrRemove(
+- ShaderScriptableStripper：：if (stripTool.StripMultiCompile(
+- ShaderBuildPreprocessor：： enum ShaderFeatures : long
