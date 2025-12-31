@@ -75,7 +75,7 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
     // m_WordsPerTile： 每个Tile使用的uint数量
     // viewCount：视口的数量，比如立体渲染时是2（分别渲染左右眼）
     ``` 
-  - 计算 `m_ZBinScale`, `m_ZBinOffset`, `m_BinCount`： 根据URP Tile Buffer拥有的uint的数量，计算Z方向上Zbin的数量，以及后续反过来使用深度Z计算Zbin序号时所需的参数。  
+  - 计算 `m_ZBinScale`, `m_ZBinOffset`, `m_BinCount`： 根据URP Zbin Buffer拥有的uint的数量，计算Z方向上Zbin的数量，以及后续反过来使用深度Z计算Zbin序号时所需的参数。  
     - 序号的计算公式为： （正交时）$Zbin序号 = \frac{Z}{Z_{far} - Z_{near}} - \frac{Z_{near}}{Z_{far} - Z_{near}}$ 
       或 （透视时）$Zbin序号 = \frac{log_{2}(Z)}{log_{2}(Z_{far} / Z_{near})} - \frac{log_{2}(Z_{near})}{log_{2}(Z_{far} / Z_{near})}$
       其中透视投影时的公式应该是出自[**id tech 6**的分享](https://advances.realtimerendering.com/s2016/Siggraph2016_idTech6.pdf)的Page 5。 
@@ -437,32 +437,32 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
           - **Spot Light**还需要计算Tile是否在锥体或底面圆的XY平面投影的范围内的情况：
             - 计算Y = PlaneY与锥体投影的交点，即计算Y = PlaneY与到底面圆XY平面投影的两条切线的交点。
               ``` C#
-                // Find two lines in screen-space for the cone if the light is a spot.
-                float coneDir0X = 0, coneDir0YInv = 0, coneDir1X = 0, coneDir1YInv = 0;
-                if (light.lightType == LightType.Spot)
-                {
-                    // Distance from light position to and radius of sphere fitted to the end of the cone.
-                    var sphereDistance = coneHeight + circleRadiusSq * coneHeightInv;
-                    var sphereRadius = math.sqrt(square(circleRadiusSq) * coneHeightInvSq + circleRadiusSq); // sphereDistance, sphereRadius, 切点到圆心线段构成一个直角三角形，根据相似三角形可以得到切点到圆心的距离。
-                    var directionXYSqInv = math.rcp(math.lengthsq(lightDirVS.xy));
-                    var polarIntersection = -circleRadiusSq * coneHeightInv * directionXYSqInv * lightDirVS.xy;
-                    var polarDir = math.sqrt((square(sphereRadius) - math.lengthsq(polarIntersection)) * directionXYSqInv) * math.float2(lightDirVS.y, -lightDirVS.x); // 将sphereDistance， sphereRadius投影到XY平面上，利用相似三角形进行计算。
-                    var conePBase = lightPosVS.xy + sphereDistance * lightDirVS.xy + polarIntersection;
-                    var coneP0 = conePBase - polarDir;
-                    var coneP1 = conePBase + polarDir; // 切线与底面圆的交点在XY平面上的投影。
+              // Find two lines in screen-space for the cone if the light is a spot.
+              float coneDir0X = 0, coneDir0YInv = 0, coneDir1X = 0, coneDir1YInv = 0;
+              if (light.lightType == LightType.Spot)
+              {
+                  // Distance from light position to and radius of sphere fitted to the end of the cone.
+                  var sphereDistance = coneHeight + circleRadiusSq * coneHeightInv;
+                  var sphereRadius = math.sqrt(square(circleRadiusSq) * coneHeightInvSq + circleRadiusSq); // sphereDistance, sphereRadius, 切点到圆心线段构成一个直角三角形，根据相似三角形可以得到切点到圆心的距离。
+                  var directionXYSqInv = math.rcp(math.lengthsq(lightDirVS.xy));
+                  var polarIntersection = -circleRadiusSq * coneHeightInv * directionXYSqInv * lightDirVS.xy;
+                  var polarDir = math.sqrt((square(sphereRadius) - math.lengthsq(polarIntersection)) * directionXYSqInv) * math.float2(lightDirVS.y, -lightDirVS.x); // 将sphereDistance， sphereRadius投影到XY平面上，利用相似三角形进行计算。
+                  var conePBase = lightPosVS.xy + sphereDistance * lightDirVS.xy + polarIntersection;
+                  var coneP0 = conePBase - polarDir;
+                  var coneP1 = conePBase + polarDir; // 切线与底面圆的交点在XY平面上的投影。
 
-                    coneDir0X = coneP0.x - lightPosVS.x;
-                    coneDir0YInv = math.rcp(coneP0.y - lightPosVS.y);
-                    coneDir1X = coneP1.x - lightPosVS.x;
-                    coneDir1YInv = math.rcp(coneP1.y - lightPosVS.y); // 切线在XY平面上的变化率。
-                }
+                  coneDir0X = coneP0.x - lightPosVS.x;
+                  coneDir0YInv = math.rcp(coneP0.y - lightPosVS.y);
+                  coneDir1X = coneP1.x - lightPosVS.x;
+                  coneDir1YInv = math.rcp(coneP1.y - lightPosVS.y); // 切线在XY平面上的变化率。
+              }
 
-                // Cone
-                var deltaY = planeY - lightPosVS.y;
-                var coneT0 = deltaY * coneDir0YInv;
-                var coneT1 = deltaY * coneDir1YInv;
-                if (coneT0 >= 0 && coneT0 <= 1) { ExpandRangeOrthographic(ref planeRange, lightPosVS.x + coneT0 * coneDir0X); }
-                if (coneT1 >= 0 && coneT1 <= 1) { ExpandRangeOrthographic(ref planeRange, lightPosVS.x + coneT1 * coneDir1X); } // 根据变化率与Y方向的差值，得到X方向上的差值
+              // Cone
+              var deltaY = planeY - lightPosVS.y;
+              var coneT0 = deltaY * coneDir0YInv;
+              var coneT1 = deltaY * coneDir1YInv;
+              if (coneT0 >= 0 && coneT0 <= 1) { ExpandRangeOrthographic(ref planeRange, lightPosVS.x + coneT0 * coneDir0X); }
+              if (coneT1 >= 0 && coneT1 <= 1) { ExpandRangeOrthographic(ref planeRange, lightPosVS.x + coneT1 * coneDir1X); } // 根据变化率与Y方向的差值，得到X方向上的差值
               ``` 
               ![20250522151333](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250522151333.png) 
               > 上图的光源朝向为(1f, 1f, 0.4f)
@@ -736,24 +736,24 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
                 ![20250804110656](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20250804110656.png)
               - 计算l1, l2与视锥的Y方向的上下面是否存在交点。 如果存在交点，将最大/最小行的cluster行在Y方向上进行标记。
                 ``` C#
-                  if ((l1.x != 0.0f) && (l1.y != 0.0f) && (l1.z != 0.0f)) //避免除以0
-                  {
-                    // 视锥体Y方向下平面的法线。
-                    // 因为viewPlaneBottoms为在 z=1 平面上，屏幕可见区域的最低 Y 值。 这里可以得到法线math.float3(0, 1, viewPlaneBottoms[m_ViewIndex])
-                    var planeNormal = math.float3(0, 1, viewPlaneBottoms[m_ViewIndex]);
-                    var l1t = math.dot(-lightPositionVS, planeNormal) / math.dot(l1, planeNormal);
-                    var l1x = lightPositionVS + l1 * l1t; // l1x: l1 与 视锥体Y方向下平面的交点。
-                    if (l1t >= 0 && l1t <= 1 && l1x.z >= near) ExpandY(l1x); // l1t >= 0 && l1t <= 1: 保证平面与圆锥相交。 l1x.z >= near： 交点是否在视锥体内。
-                  }
+                if ((l1.x != 0.0f) && (l1.y != 0.0f) && (l1.z != 0.0f)) //避免除以0
+                {
+                  // 视锥体Y方向下平面的法线。
+                  // 因为viewPlaneBottoms为在 z=1 平面上，屏幕可见区域的最低 Y 值。 这里可以得到法线math.float3(0, 1, viewPlaneBottoms[m_ViewIndex])
+                  var planeNormal = math.float3(0, 1, viewPlaneBottoms[m_ViewIndex]);
+                  var l1t = math.dot(-lightPositionVS, planeNormal) / math.dot(l1, planeNormal);
+                  var l1x = lightPositionVS + l1 * l1t; // l1x: l1 与 视锥体Y方向下平面的交点。
+                  if (l1t >= 0 && l1t <= 1 && l1x.z >= near) ExpandY(l1x); // l1t >= 0 && l1t <= 1: 保证平面与圆锥相交。 l1x.z >= near： 交点是否在视锥体内。
+                }
 
-                  if ((l2.x != 0.0f) && (l2.y != 0.0f) && (l2.z != 0.0f)) 
-                  {
-                      var planeNormal = math.float3(0, 1, viewPlaneTops[m_ViewIndex]);
-                      var l1t = math.dot(-lightPositionVS, planeNormal) / math.dot(l1, planeNormal); // 这里应该是笔误？应该要及时的是l2 与 视锥体Y方向上平面的交点。
-                      var l1x = lightPositionVS + l1 * l1t;
-                      if (l1t >= 0 && l1t <= 1 && l1x.z >= near) ExpandY(l1x);
-                  }
-                ```
+                if ((l2.x != 0.0f) && (l2.y != 0.0f) && (l2.z != 0.0f)) 
+                {
+                    var planeNormal = math.float3(0, 1, viewPlaneTops[m_ViewIndex]);
+                    var l1t = math.dot(-lightPositionVS, planeNormal) / math.dot(l1, planeNormal); // 这里应该是笔误？应该要及时的是l2 与 视锥体Y方向上平面的交点。
+                    var l1x = lightPositionVS + l1 * l1t;
+                    if (l1t >= 0 && l1t <= 1 && l1x.z >= near) ExpandY(l1x);
+                }
+              ```
               - 计算l1, l2与各Tile行在Y方向上界的交点，判断Tile行是否受到该spot light影响。
                 ``` c#
                 for (var planeIndex = m_TileYRange.start + 1; planeIndex <= m_TileYRange.end; planeIndex++) // 视锥体的Y方向上的最大，最小面在上文已被处理，这里的循环将其忽略了？
@@ -1240,7 +1240,7 @@ Deferred+开启时，会在URP管线中会创建[ForwardLights](https://github.c
         }
         ```  
       - 计算Spot/Point lights: 根据片元的屏幕空间，世界空间位置从Cluster中读取光源信息。
-        将 `LIGHT_LOOP_BEGIN`, `URP_FP_DIRECTIONAL_LIGHTS_COUNT`, `CLUSTER_LIGHT_LOOP_SUBTRACTIVE_LIGHT_CHECK`登定义进行转换。
+        将 `LIGHT_LOOP_BEGIN`, `URP_FP_DIRECTIONAL_LIGHTS_COUNT`, `CLUSTER_LIGHT_LOOP_SUBTRACTIVE_LIGHT_CHECK`等定义进行转换。
         **ClusterDeferred.shader**中关于Spot/Point lights的计算部分的代码等价于以下代码。
         ``` C
         uint lightIndex;

@@ -399,7 +399,73 @@ cube to octa 时图像上下颠倒的问题：
 -----
 
 urp 改默认keyword:
--  UniversalRenderPipelineAsset：：#if UNITY_EDITOR // multi_compile_fragment _ _REFLECTION_PROBE_ROTATED
+-  UniversalRenderPipelineAsset：：#if UNITY_EDITOR // multi_compile_fragment _ _REFLECTION_PROBE_USE_OCTAHEDRALMAP
         [ShaderKeywordFilter.SelectOrRemove(
 - ShaderScriptableStripper：：if (stripTool.StripMultiCompile(
 - ShaderBuildPreprocessor：： enum ShaderFeatures : long
+
+-------
+如何从外向内画skytexture： （因为是从外向内画， 所有只改transform没用）
+计算六个面对应的viewmatrix： 
+``` c#
+        private static readonly Vector3[] faceForwards = {
+            new Vector3(0, 0, -1),  // Positive X (右侧)
+            new Vector3(0, 0, 1),   // Negative X (左侧)
+            new Vector3(1, 0, 0),   // Positive Y (上方)
+            new Vector3(1, 0, 0),   // Negative Y (下方)
+            new Vector3(1, 0, 0),   // Positive Z (前方)
+            new Vector3(-1, 0, 0)   // Negative Z (后方)
+        };
+
+        private static readonly Vector3[] faceUps = {
+            new Vector3(0, -1, 0),  // Positive X
+            new Vector3(0, -1, 0),  // Negative X
+            new Vector3(0, 0, 1),   // Positive Y
+            new Vector3(0, 0, -1),  // Negative Y
+            new Vector3(0, -1, 0),  // Positive Z
+            new Vector3(0, -1, 0)   // Negative Z
+        };
+
+        private static readonly Vector3[] faceRights = {
+            new Vector3(-1, 0, 0),  // Positive X
+            new Vector3(1, 0, 0),   // Negative X
+            new Vector3(0, -1, 0),  // Positive Y
+            new Vector3(0, 1, 0),   // Negative Y
+            new Vector3(0, 0, -1),  // Positive Z
+            new Vector3(0, 0, 1)    // Negative Z
+        };
+
+        public static Matrix4x4 SetBasisTransposed(this Matrix4x4 matrix, Vector3 forward, Vector3 up, Vector3 right)
+        {
+            // 创建一个矩阵，列向量分别为forward, up, right
+            matrix[0, 0] = forward.x; matrix[0, 1] = up.x; matrix[0, 2] = right.x; matrix[0, 3] = 0;
+            matrix[1, 0] = forward.y; matrix[1, 1] = up.y; matrix[1, 2] = right.y; matrix[1, 3] = 0;
+            matrix[2, 0] = forward.z; matrix[2, 1] = up.z; matrix[2, 2] = right.z; matrix[2, 3] = 0;
+            matrix[3, 0] = 0; matrix[3, 1] = 0; matrix[3, 2] = 0; matrix[3, 3] = 1;
+
+            // 返回转置后的矩阵
+            return matrix.transpose;
+        }
+
+        private static Matrix4x4 CalculateViewMatrixWithSetBasisTransposed(Transform cameraTransform, int face)
+        {
+            Vector3 position = cameraTransform.position;
+
+            Vector3 forward = faceForwards[face];
+            Vector3 up = faceUps[face];
+            Vector3 right = faceRights[face];
+
+            Vector3 worldForward = cameraTransform.TransformDirection(forward);
+            Vector3 worldUp = cameraTransform.TransformDirection(up);
+            Vector3 worldRight = cameraTransform.TransformDirection(right);
+
+            Matrix4x4 viewMatrix = new Matrix4x4();
+            viewMatrix = viewMatrix.SetBasisTransposed(worldForward, worldUp, worldRight);
+
+            Matrix4x4 translateMatrix = Matrix4x4.Translate(-position);
+
+            return viewMatrix * translateMatrix;
+        }
+```
+然后将计算得到的view matrix 设置到相机的worldToCameraMatrix 上。
+此外，因为是外向内画，会导致相机中片元的winding order与正常情况相反，通过设置cmd.SetInvertCulling(true);来反转winding order。

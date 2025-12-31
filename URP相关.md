@@ -30,3 +30,8 @@
 - 15： Native Renderpass -> 底层原理即Vulkan那一套RenderPass/subpass
 - 16: TEXTURE2D_X 在开启XR,VR 的情况下，会被解释为TEXTURE2D_ARRAY，而不是TEXTURE2D。 使用 _BlitTexture等内置的贴图，需要注意。 #USE_TEXTURE2D_X_AS_ARRAY #BLIT_SINGLE_SLICE -> 比如 TEXTURE2D_ARGS不能用于传递'Texture2DArray<float4>' ，而 URP内部并不会针对XR环境重新定义TEXTURE2D_ARGS
     > TEXTURE2D_X,  TEXTURE2D_X_ARGS 等： 中的 “_X” 应该为支持XR的含义？
+- 17: URP 中使用 Material.SetFloat 无法保证材质的值传递的时间， 需要通过生成material副本 或者使用 MaterialPropertyBlock 来进行传递。
+- 18: 从SV_VertexID 得到 pos 和uv -》 GetFullScreenTriangleVertexPosition， GetFullScreenTriangleTexCoord 
+  > 参考 srp core中的 Blit.hlsl
+- 19: URP中Shadowmap计算阴影范围的culling sphere，只受到相机远近平面及shadow distance的影响。
+- 20: 在URP Asset的editor 面板中改变属性，会触发URP Asset的重建。 而使用script 进行改变则不会触发整个Asset的重建。
