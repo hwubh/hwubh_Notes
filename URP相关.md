@@ -35,3 +35,6 @@
   > 参考 srp core中的 Blit.hlsl
 - 19: URP中Shadowmap计算阴影范围的culling sphere，只受到相机远近平面及shadow distance的影响。
 - 20: 在URP Asset的editor 面板中改变属性，会触发URP Asset的重建。 而使用script 进行改变则不会触发整个Asset的重建。
+- 21: 不需要final blit的情况: 不是直接渲染到back buffer 上的， 或者 渲染到back buffer上，但需要需要FinalPost pass/FXAA/TAA的。 以下为需要注意的几个参数：
+  - renderFeature的数量（inactive的也算）和 renderingData里的 `m_IntermediateTextureMode`参数。 这两个影响是否使用back buffer 作为 rendertarget
+  - FinalPost: 如果使用了FXAA/TAA/非线性Scaling，会触发添加FinalPost，在另一张RT(ColorAttachmentB)上处理UberPost，然后再FinalPost 到back buffer上。
