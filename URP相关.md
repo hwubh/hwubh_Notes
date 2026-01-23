@@ -38,3 +38,7 @@
 - 21: 不需要final blit的情况: 不是直接渲染到back buffer 上的， 或者 渲染到back buffer上，但需要需要FinalPost pass/FXAA/TAA的。 以下为需要注意的几个参数：
   - renderFeature的数量（inactive的也算）和 renderingData里的 `m_IntermediateTextureMode`参数。 这两个影响是否使用back buffer 作为 rendertarget
   - FinalPost: 如果使用了FXAA/TAA/非线性Scaling，会触发添加FinalPost，在另一张RT(ColorAttachmentB)上处理UberPost，然后再FinalPost 到back buffer上。
+- 22： TextureDesc中设置depthBufferBits， colorFormat， 二者会互相影响，只允许设置为只有color，或只有depth。 RenderTextureDescriptor中没有限制，但是通过ReAllocateHandleIfNeeded创建RT时，也不允许同时又color 和 depth。 
+  - 理论上RTHandle确实只指向color或depth一种资源，但如果作为RenderTarget，其的RT实际又包含 两个 GPU 资源（颜色缓冲区 + 深度模板缓冲区）
+  - 为了避免这种混淆，最好不要使用ReAllocateHandleIfNeeded进行创建和管理。
+  (https://discussions.unity.com/t/fixing-rendertexturedescriptor-warning/1562637/3)
