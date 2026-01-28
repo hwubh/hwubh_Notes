@@ -462,95 +462,216 @@ public void RenderRealtimeReflectionProbe(ScriptableRenderContext context, Refle
     m_FaceRT.Create();
 }
 ```
-接下来就是要调整调整相机的VP矩阵，以此渲染六个面进行渲染。
+这里也存在另一种做法是修改 RenderingUtils.ReAllocateHandleIfNeeded，传入一个bool值，使之在创建RT时保留Depth相关的信息。
+``` C#
+RenderingUtils.ReAllocateHandleIfNeeded(ref m_FaceRT, faceRTDesc, FilterMode.Point, TextureWrapMode.Clamp, 1, 0, "ReflectionProbe_FaceRT", true);
+
+public static bool ReAllocateHandleIfNeeded(
+    ref RTHandle handle,
+    in RenderTextureDescriptor descriptor,
+    FilterMode filterMode = FilterMode.Point,
+    TextureWrapMode wrapMode = TextureWrapMode.Repeat,
+    int anisoLevel = 1,
+    float mipMapBias = 0,
+    string name = "",
+    bool isRenderTarget = false)
+{
+    if(!isRenderTarget)
+        Assertions.Assert.IsTrue(descriptor.graphicsFormat == GraphicsFormat.None ^ descriptor.depthStencilFormat == GraphicsFormat.None);
+
+    //...
+    handle = RTHandles.Alloc(descriptor.width, descriptor.height, allocInfo, isRenderTarget);
+    //...
+}
+
+public static RTHandle Alloc(int width, int height, RTHandleAllocInfo info, bool isRenderTarget = false)
+{
+    return s_DefaultInstance.Alloc(width, height, info, isRenderTarget);
+}
+
+public RTHandle Alloc(int width, int height, RTHandleAllocInfo info, bool isRenderTarget = false)
+{
+    var rt = CreateRenderTexture(
+            width, height, info.format, info.slices, info.filterMode, info.wrapModeU, info.wrapModeV, info.wrapModeW, info.dimension, info.enableRandomWrite, info.useMipMap
+            , info.autoGenerateMips, info.isShadowMap, info.anisoLevel, info.mipMapBias, info.msaaSamples, info.bindTextureMS
+            , info.useDynamicScale, info.useDynamicScaleExplicit, info.memoryless, info.vrUsage, info.enableShadingRate, info.name, isRenderTarget);
+    //...
+}
+
+private RenderTexture CreateRenderTexture(
+    int width,
+    int height,
+    GraphicsFormat format,
+    int slices,
+    FilterMode filterMode,
+    TextureWrapMode wrapModeU,
+    TextureWrapMode wrapModeV,
+    TextureWrapMode wrapModeW,
+    TextureDimension dimension,
+    bool enableRandomWrite,
+    bool useMipMap,
+    bool autoGenerateMips,
+    bool isShadowMap,
+    int anisoLevel,
+    float mipMapBias,
+    MSAASamples msaaSamples,
+    bool bindTextureMS,
+    bool useDynamicScale,
+    bool useDynamicScaleExplicit,
+    RenderTextureMemoryless memoryless,
+    VRTextureUsage vrUsage,
+    bool enableShadingRate,
+    string name,
+    bool isRenderTarget = false)
+{
+    //
+    if(isRenderTarget)
+    {
+        colorFormat = format;
+        depthStencilFormat = GraphicsFormatUtility.GetDepthStencilFormat(24, 0);
+        stencilFormat = GraphicsFormat.None;
+        shadowSamplingMode = ShadowSamplingMode.None;
+
+        fullName = CoreUtils.GetRenderTargetAutoName(width, height, slices, format, dimension, name, mips: useMipMap, enableMSAA: enableMSAA, msaaSamples: msaaSamples, dynamicRes: useDynamicScale, dynamicResExplicit: useDynamicScaleExplicit);
+    }
+    else 
+    //...if (isShadowMap)
+}
+```
+接下来就是要调整调整相机的VP矩阵，依次渲染六个面进行渲染。 这里需要注意的是，我们渲染面到Cubemap时需要反转Y轴，否则最后的Cubemap结果会是上下颠倒的。 因而我们在定义相机的View矩阵时会手动反转Y轴的正反。 但这个操作又会反转View矩阵的手性，导致物体的正面被错误剔除，因此我们还需要通过`cmd.SetInvertCulling`反转剔除面。
 ``` C#
 public void RenderRealtimeReflectionProbe(ScriptableRenderContext context, ReflectionProbe probe, ref RTHandle cubemapTexture)
 {
     // 确保 m_FaceRT 已创建或重新分配（如果需要）
     //...
 
-    for (int i = 0; i < 6; i++)
+    for (int face = 0; face < 6; face++)
     {
-        CubemapFace face = (CubemapFace)i;
-        SetupCameraForCubemapFace(face);
+        m_RenderFaceCamera.worldToCameraMatrix = Matrix4x4.identity.SetViewMatrix(m_RenderFaceCamera.gameObject.transform, face);
 
-        // 使用成员变量 m_FaceRT 作为渲染目标
+        // 渲染时应用 cmd.SetInvertCulling
     }
 }
 
 /// <summary>
-/// 设置相机朝向立方体贴图的六个方向之一
+/// 矩阵扩展方法，用于计算 Cubemap 面的 View 矩阵
 /// </summary>
-/// <param name="position">相机位置（通常是反射探针的位置）</param>
-/// <param name="face">立方体面的索引 (0-5)</param>
-void SetupCameraForCubemapFace(CubemapFace face)
+public static class MatrixExtensions
 {
-    // 定义六个方向的前向向量和上向量
-    Vector3 forward = Vector3.forward;
-    Vector3 up = Vector3.up;
+    // Cubemap 六个面的方向向量定义（在探针的本地坐标系中）
+    // 顺序：PositiveX, NegativeX, PositiveY, NegativeY, PositiveZ, NegativeZ
+    private static readonly Vector3[] faceRights = {
+        new Vector3( 0, 0,-1),  // Positive X (右侧) - 看向 +X 方向
+        new Vector3( 0, 0, 1),  // Negative X (左侧) - 看向 -X 方向
+        new Vector3( 1, 0, 0),  // Positive Y (上方) - 看向 +Y 方向
+        new Vector3( 1, 0, 0),  // Negative Y (下方) - 看向 -Y 方向
+        new Vector3( 1, 0, 0),  // Positive Z (前方) - 看向 +Z 方向
+        new Vector3(-1, 0, 0)   // Negative Z (后方) - 看向 -Z 方向
+    };
 
-    switch (face)
+    // 手动反转Y轴，因为反射探针的画面是上下颠倒的。
+    private static readonly Vector3[] faceUps = {
+        new Vector3(0,-1, 0),   // Positive X - 上方向为 +Y
+        new Vector3(0,-1, 0),   // Negative X - 上方向为 +Y
+        new Vector3(0, 0, 1),   // Positive Y - 上方向为 -Z
+        new Vector3(0, 0,-1),   // Negative Y - 上方向为 +Z
+        new Vector3(0,-1, 0),   // Positive Z - 上方向为 +Y
+        new Vector3(0,-1, 0)    // Negative Z - 上方向为 +Y
+    };
+
+    private static readonly Vector3[] faceForwards  = {
+        new Vector3(-1, 0, 0),   // Positive X - 右方向为 -Z
+        new Vector3( 1, 0, 0),   // Negative X - 右方向为 +Z
+        new Vector3( 0,-1, 0),   // Positive Y - 右方向为 +X
+        new Vector3( 0, 1, 0),   // Negative Y - 右方向为 +X
+        new Vector3( 0, 0,-1),   // Positive Z - 右方向为 +X
+        new Vector3( 0, 0, 1)    // Negative Z - 右方向为 -X
+    };
+
+    /// <summary>
+    /// 为 Cubemap 的指定面设置 View 矩阵（worldToCameraMatrix）
+    /// 此方法会正确处理手性问题，确保正确的面剔除行为
+    /// </summary>
+    /// <param name="matrix">要设置的矩阵（通常为 worldToCameraMatrix）</param>
+    /// <param name="cameraPosition">相机在世界空间中的位置</param>
+    /// <param name="face">Cubemap 面的索引 (0-5: PositiveX, NegativeX, PositiveY, NegativeY, PositiveZ, NegativeZ)</param>
+    /// <returns>计算好的 worldToCameraMatrix</returns>
+    public static Matrix4x4 SetViewMatrix(this Matrix4x4 matrix, Transform cameraTransform, int face)
     {
-        case CubemapFace.PositiveX: // Right (+X)
-            forward = Vector3.right;
-            up = Vector3.up;
-            break;
-        case CubemapFace.NegativeX: // Left (-X)
-            forward = Vector3.left;
-            up = Vector3.up;
-            break;
-        case CubemapFace.PositiveY: // Up (+Y)
-            forward = Vector3.up;
-            up = Vector3.back;
-            break;
-        case CubemapFace.NegativeY: // Down (-Y)
-            forward = Vector3.down;
-            up = Vector3.forward;
-            break;
-        case CubemapFace.PositiveZ: // Forward (+Z)
-            forward = Vector3.forward;
-            up = Vector3.up;
-            break;
-        case CubemapFace.NegativeZ: // Back (-Z)
-            forward = Vector3.back;
-            up = Vector3.up;
-            break;
+        if (face < 0 || face >= 6)
+        {
+            Debug.LogError($"Invalid cubemap face index: {face}. Must be between 0 and 5.");
+            return matrix;
+        }
+
+        // 获取该面的方向向量（在探针的本地坐标系中，假设探针 transform 为 identity）
+        Vector3 right = faceRights[face];
+        Vector3 up = faceUps[face];
+        Vector3 forward = faceForwards[face];
+
+        Vector3 worldRight = cameraTransform.TransformDirection(right);
+        Vector3 worldUp = cameraTransform.TransformDirection(up);
+        Vector3 worldForward = cameraTransform.TransformDirection(forward);
+
+        // 构建 View 矩阵
+        // View 矩阵的行向量应该是 (right, up, -forward)
+        // 因为相机空间是右手坐标系，Z 轴指向相机后方（负 forward 方向）
+        Matrix4x4 viewMatrix = new Matrix4x4();
+        
+        // 设置行向量：第一行 = right, 第二行 = up, 第三行 = -forward
+        viewMatrix.SetRow(0, new Vector4(worldRight.x, worldRight.y, worldRight.z, 0));
+        viewMatrix.SetRow(1, new Vector4(worldUp.x, worldUp.y, worldUp.z, 0));
+        viewMatrix.SetRow(2, new Vector4(worldForward.x, worldForward.y, worldForward.z, 0));
+        viewMatrix.SetRow(3, new Vector4(0, 0, 0, 1));
+
+        // 应用平移：将世界坐标转换为相机相对坐标
+        Matrix4x4 translateMatrix = Matrix4x4.Translate(-cameraTransform.position);
+        Matrix4x4 resultMatrix = viewMatrix * translateMatrix;
+
+        return resultMatrix;
     }
-
-    // 使用 TransformDirection 计算世界空间的基向量
-    // 这些向量定义了相机的局部坐标系在世界空间中的方向
-    Vector3 right = m_RenderFaceCamera.transform.TransformDirection(Vector3.right);
-    Vector3 cameraUp = m_RenderFaceCamera.transform.TransformDirection(Vector3.up);
-    Vector3 cameraForward = m_RenderFaceCamera.transform.TransformDirection(Vector3.forward);
-
-    // 构建 worldToCameraMatrix - 将世界坐标转换到相机坐标
-    // 矩阵的行向量是相机坐标系的基向量（以转置形式）
-    Matrix4x4 worldToCameraMatrix = new Matrix4x4();
-    
-    // 设置基向量（行向量）和平移部分
-    // 平移部分使用 TransformDirection 计算得到的基向量和 position 的点积
-    worldToCameraMatrix.m00 = right.x;
-    worldToCameraMatrix.m01 = right.y;
-    worldToCameraMatrix.m02 = right.z;
-    worldToCameraMatrix.m03 = 0;
-    
-    worldToCameraMatrix.m10 = cameraUp.x;
-    worldToCameraMatrix.m11 = cameraUp.y;
-    worldToCameraMatrix.m12 = cameraUp.z;
-    worldToCameraMatrix.m13 = 0;
-    
-    worldToCameraMatrix.m20 = cameraForward.x;
-    worldToCameraMatrix.m21 = cameraForward.y;
-    worldToCameraMatrix.m22 = cameraForward.z;
-    worldToCameraMatrix.m23 = 0;
-    
-    worldToCameraMatrix.m30 = 0;
-    worldToCameraMatrix.m31 = 0;
-    worldToCameraMatrix.m32 = 0;
-    worldToCameraMatrix.m33 = 1;
-
-    // 应用到相机
-    m_RenderFaceCamera.worldToCameraMatrix = worldToCameraMatrix;
 }
 ```
-接下来就是要调整调整相机的VP矩阵，以此渲染六个面进行渲染。
+参照管线中渲染相机的方式，构建CameraData, AdditionalCameraData. 然后参照`UniversalRenderPipeline.RenderSingleCamera`创建函数`UniversalRenderPipeline.RenderSingleCameraForReflectionProbe`, 专门用于绘制反射探针。
+``` C#
+/// <summary>
+/// Renders a single camera for reflection probe cubemap face.
+/// This method is similar to RenderSingleCamera, but performs a copy operation to the cubemap face
+/// before submitting the context, ensuring the copy happens in the same submit as the rendering.
+/// </summary>
+/// <param name="context">Render context used to record commands during execution.</param>
+/// <param name="cameraData">Camera rendering data.</param>
+/// <param name="sourceTexture">Source render texture (the face render target).</param>
+/// <param name="cubemapTexture">Target cubemap texture.</param>
+/// <param name="cubemapFace">Target cubemap face to copy to.</param>
+internal static void RenderSingleCameraForReflectionProbe(ScriptableRenderContext context, UniversalCameraData cameraData, RenderTexture sourceTexture, RenderTexture cubemapTexture, CubemapFace cubemapFace)
+{
+    //...using (new ProfilingScope(cmdScope, cameraMetadata.sampler))
+    {
+        //...renderer.AddRenderPasses(ref legacyRenderingData);
+
+        // 手动反转剔除面。 姑且放在这里
+        cmd.SetInvertCulling(true);
+
+        //...if (!useRenderGraph) 
+
+        cmd.SetInvertCulling(false);
+
+        // Copy the rendered face to the cubemap before submitting
+        // This ensures the copy happens in the same submit as the rendering
+        if (sourceTexture != null && cubemapTexture != null)
+        {
+            if ((SystemInfo.copyTextureSupport & CopyTextureSupport.DifferentTypes) != 0)
+            {
+                cmd.CopyTexture(sourceTexture, 0, 0, cubemapTexture, (int)cubemapFace, 0);
+            }
+            else
+            {
+                Debug.LogError($"CopyTexture to cubemap face is not supported on this platform. ReflectionProbe face {cubemapFace} will not be copied.");
+            }
+        }
+    } // When ProfilingSample goes out of scope, an "EndSample" command is enqueued into CommandBuffer cmd
+
+    //...context.ExecuteCommandBuffer(cmd); // Sends to ScriptableRenderContext all the commands enqueued since cmd.Clear, including the copy command
+}
+```
