@@ -476,3 +476,4 @@ urp 改默认keyword:
 - Prefiltered Environment Map （LD项，Radiance (L) × Distribution (D)） -》 取决于反射方向 (ωr​) 和 粗糙度 (α) -> 储存在反射探针中，每级mip对应一个粗糙度。反射方向对应UV。 
 > D项只是为了确定重要性采样的pdf而引入的？？？
 - Environment BRDF（DFG项，分布 (D)、菲涅尔 (F) 和 几何 (G)）： 存储在LUT图中，记录F的scale和G的bias。通过cosθv​ (N⋅V) 和 粗糙度 (α)进行查找。
+---------------------------
