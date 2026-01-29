@@ -469,3 +469,10 @@ urp 改默认keyword:
 ```
 然后将计算得到的view matrix 设置到相机的worldToCameraMatrix 上。
 此外，因为是外向内画，会导致相机中片元的winding order与正常情况相反，通过设置cmd.SetInvertCulling(true);来反转winding order。
+
+
+----------------
+环境镜面反射的实现: 将镜面反射函数的求解，通过蒙特卡洛积分转化为有限个样本的求和。然后将该求和分割为两个和式的乘积（split sum approximate），分布求和式（Pre-Filtered Environment Map） 和 和式（Environment BRDF）。
+- Prefiltered Environment Map （LD项，Radiance (L) × Distribution (D)） -》 取决于反射方向 (ωr​) 和 粗糙度 (α) -> 储存在反射探针中，每级mip对应一个粗糙度。反射方向对应UV。 
+> D项只是为了确定重要性采样的pdf而引入的？？？
+- Environment BRDF（DFG项，分布 (D)、菲涅尔 (F) 和 几何 (G)）： 存储在LUT图中，记录F的scale和G的bias。通过cosθv​ (N⋅V) 和 粗糙度 (α)进行查找。

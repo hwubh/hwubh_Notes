@@ -372,7 +372,7 @@ public void EnsureRealtimeTexture(ReflectionProbe probe)
     if (probe == null)
         return;
 
-    if (m_CustomRealtimeTexture != null)
+    if (m_CustomRealtimeTexture != null && m_CustomRealtimeTexture.rt != null)
         return;
 
     // 创建 Cubemap RenderTexture 描述符
@@ -675,3 +675,118 @@ internal static void RenderSingleCameraForReflectionProbe(ScriptableRenderContex
     //...context.ExecuteCommandBuffer(cmd); // Sends to ScriptableRenderContext all the commands enqueued since cmd.Clear, including the copy command
 }
 ```
+点开Frame Debugger，可以看的反射探针已经开始渲染了。
+![20260129102729](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260129102729.png)
+为了更好的对比效果，我们需要将绘制好的Cubemap传回反射探针中，使之像下图中baked的反射探针一样可以被预览。
+![20260129102946](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260129102946.png)
+为此我们需要重载反射探针的编辑器[ReflectionProbeEditor](https://github.com/Unity-Technologies/UnityCsReference/blob/master/Editor/Mono/Inspector/ReflectionProbeEditor.cs). 在"com.unity.render-pipelines.universal\Editor\"目录下创建脚本**ReflectionProbeEditor.cs**, 将从UnityCsReference拿到的代码直接贴入，然后通过反射绕过所有的访问限制。
+> 文本量较大，这里就不贴出了。可以参考项目源代码：。
+为了使我们自定义Cubemap图可以通过接口 `ReflectionProbe.realtimeTexture`传入，我们需要让Untiy不再自行更新实时反射探针。 具体做法是将在`UniversalAdditionalReflectionProbeData`添加自定义的`RefreshMode`替代反射探针上原有的`RefreshMode`, 然后将后者恒定设置为"ViaScripting"以防止触发更新。 同时，我们也需要修改编辑器，以支持自定义的`RefreshMode`。
+``` C#
+public class UniversalAdditionalReflectionProbeData : MonoBehaviour
+{
+    [SerializeField]
+    private ReflectionProbeRefreshMode m_CustomRefreshMode = ReflectionProbeRefreshMode.OnAwake;
+
+    /// <summary>
+    /// 获取或设置自定义刷新模式
+    /// 此模式用于控制反射探针的更新行为，替代 ReflectionProbe 原生的 refreshMode
+    /// </summary>
+    public ReflectionProbeRefreshMode customRefreshMode
+    {
+        get => m_CustomRefreshMode;
+        set => m_CustomRefreshMode = value;
+    }
+}
+
+internal class ReflectionProbeEditor : Editor
+{
+    //... SerializedProperty[] m_NearAndFarProperties;
+    // UniversalAdditionalReflectionProbeData 的 SerializedObject，用于访问其所有序列化属性
+    SerializedObject m_ProbeDataSerializedObject;
+    SerializedProperty m_CustomRefreshMode; // 自定义 RefreshMode（来自 UniversalAdditionalReflectionProbeData）    \
+
+    //... ReflectionProbe p = target as ReflectionProbe;
+    // 查找 UniversalAdditionalReflectionProbeData 组件并创建 SerializedObject
+    if (p != null)
+    {
+        var probeData = p.GetUniversalAdditionalReflectionProbeData();
+        if (probeData != null)
+        {
+            // 创建 UniversalAdditionalReflectionProbeData 的 SerializedObject
+            m_ProbeDataSerializedObject = new SerializedObject(probeData);
+            m_CustomRefreshMode = m_ProbeDataSerializedObject.FindProperty("m_CustomRefreshMode");
+        }
+        else
+        {
+            m_ProbeDataSerializedObject = null;
+            m_CustomRefreshMode = null;
+        }
+    }
+
+    //... m_CachedGizmoMaterials.Clear();
+    m_ProbeDataSerializedObject = null;
+
+    //.. serializedObject.Update();
+    // 更新 UniversalAdditionalReflectionProbeData 的 SerializedObject（如果存在）
+    if (m_ProbeDataSerializedObject != null)
+    {
+        m_ProbeDataSerializedObject.Update();
+    }
+
+    //... if (EditorGUILayout.BeginFadeGroup(m_ShowProbeModeRealtimeOptions.faded)){
+    // 显示自定义的 RefreshMode（来自 UniversalAdditionalReflectionProbeData）
+    // 而不是 ReflectionProbe 原生的 refreshMode（已固定为 ViaScripting）
+    ReflectionProbe probe = reflectionProbeTarget;
+    if (m_ProbeDataSerializedObject != null && m_CustomRefreshMode != null)
+    {
+        EditorGUI.BeginChangeCheck();
+        EditorGUILayout.PropertyField(m_CustomRefreshMode, Styles.refreshMode);
+        if (EditorGUI.EndChangeCheck())
+        {                        
+            // 确保 ReflectionProbe 的 refreshMode 保持为 ViaScripting
+            if (probe.refreshMode != ReflectionProbeRefreshMode.ViaScripting)
+            {
+                Undo.RecordObject(probe, "Set ReflectionProbe RefreshMode to ViaScripting");
+                probe.refreshMode = ReflectionProbeRefreshMode.ViaScripting;
+                EditorUtility.SetDirty(probe);
+            }
+        }
+    }
+    else
+    {
+        // Fallback: 如果没有 UniversalAdditionalReflectionProbeData，显示原生的 RefreshMode
+        EditorGUILayout.PropertyField(m_RefreshMode, Styles.refreshMode);
+    }
+
+    //... serializedObject.ApplyModifiedProperties();
+    // 应用 UniversalAdditionalReflectionProbeData 的修改（如果存在）
+    if (m_ProbeDataSerializedObject != null)
+    {
+        m_ProbeDataSerializedObject.ApplyModifiedProperties();
+    }
+}
+
+public void RenderRealtimeReflectionProbe(ScriptableRenderContext context, ReflectionProbe probe, ref RTHandle cubemapTexture)
+{
+    //.. 最后面
+    // 恢复相机的 targetTexture
+    m_RenderFaceCamera.targetTexture = null;
+    // 更新反射探针的实时纹理
+    probe.realtimeTexture = cubemapTexture;
+}
+
+```
+对比下使用Unity Baked的效果和我们绘制的结果。
+![20260129102610](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260129102610.png)
+
+处理好Mip0的渲染后，既可以开始进行渲染各级mip。这里主要参考了HDRP中的实现。
+首先创建一张Cubemap`m_IntermediumRT` 作为中转，将`m_FaceRT`的渲染结果转而复制到这张图上。 而原先的Cubemap储存卷积后的结果。
+```C#
+```
+从`CommandBufferPool`中获取一个CommandBuffer对象，让`m_IntermediumRT`生成mipmap。
+``` C#
+```
+创建函数`FilterCubemapGGX`生成各个粗糙度的预过滤环境贴图，将Cubemap作为渲染目标。 具体卷积方法参考URP.Core中 [ImageBasedLighting.hlsl](https://github.com/advancedfx/afx-unity-srp/blob/advancedfx/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl)的函数`IntegrateLD`。 不过这里考虑到每级mip固定只采样34次，一共只存在204个采样点。我这直接将采样点对应的入射方向和立体角定义在hlsl中，而不是原方法中使用LUT图或实时计算。
+> 不过如果反射贴图的尺寸较大，如512*512。34次采样可能不太够。
+> 实测下来Unity原生那套用高斯模糊层级模糊性能上其实不太理想，可能是不必要的blit操作太多了。
