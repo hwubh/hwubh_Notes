@@ -783,10 +783,399 @@ public void RenderRealtimeReflectionProbe(ScriptableRenderContext context, Refle
 处理好Mip0的渲染后，既可以开始进行渲染各级mip。这里主要参考了HDRP中的实现。
 首先创建一张Cubemap`m_IntermediumRT` 作为中转，将`m_FaceRT`的渲染结果转而复制到这张图上。 而原先的Cubemap储存卷积后的结果。
 ```C#
+public void RenderRealtimeReflectionProbe(ScriptableRenderContext context, ReflectionProbe probe, ref RTHandle cubemapTexture)
+{
+    //...            if(!RenderingUtils.ReAllocateHandleIfNeeded(ref m_FaceRT, faceRTDesc, FilterMode.Point, TextureWrapMode.Clamp, 1, 0, "ReflectionProbe_FaceRT", true)) return;
+    // 创建中转纹理，用于存储渲染结果并生成 mipmap
+    RenderTextureDescriptor intermediumRTDesc = faceRTDesc;
+    intermediumRTDesc.useMipMap = true; // 启用 mipmap
+    intermediumRTDesc.dimension = TextureDimension.Cube;
+    intermediumRTDesc.depthBufferBits = 0;
+    if(!RenderingUtils.ReAllocateHandleIfNeeded(ref m_IntermediumRT, intermediumRTDesc, FilterMode.Trilinear, TextureWrapMode.Clamp, 1, 0, "ReflectionProbe_IntermediumRT"))
+        return;
+
+    //... cameraData.antialiasing = AntialiasingMode.None;
+
+    // 使用专门为反射探针设计的方法，它会在渲染完成后自动 copy 到 cubemap
+    UniversalRenderPipeline.RenderSingleCameraForReflectionProbe(context, cameraData, ref m_FaceRT, ref m_IntermediumRT, (CubemapFace)face);
+}
 ```
-从`CommandBufferPool`中获取一个CommandBuffer对象，让`m_IntermediumRT`生成mipmap。
+从`CommandBufferPool`中获取一个CommandBuffer对象，让`m_IntermediumRT`生成mipmap. 创建函数`FilterCubemapGGX`生成各个粗糙度的预过滤环境贴图，将Cubemap作为渲染目标，`m_IntermediumRT`作为卷积时采样的对象。
 ``` C#
+private Material m_FilterCubemapMaterial;
+
+/// <summary>
+/// 获取 FilterCubemap Material，如果不存在则自动创建/更新
+/// </summary>
+private Material filterCubemapMaterial
+{
+    get
+    {
+        // 获取 shader
+        Shader filterShader = null;
+        var resources = ReflectionProbeResources.instance;
+        if (resources != null)
+        {
+            filterShader = resources.filterCubemapShader;
+        }
+
+        if (filterShader == null)
+        {
+            Debug.LogError("FilterCubemap shader not found! Please ensure ReflectionProbeResources asset exists and has the shader assigned.");
+            return null;
+        }
+
+        // 检查并创建/更新缓存的 Material
+        if (m_FilterCubemapMaterial == null)
+        {
+            m_FilterCubemapMaterial = new Material(filterShader);
+            m_FilterCubemapMaterial.hideFlags = HideFlags.HideAndDontSave;
+        }
+
+        return m_FilterCubemapMaterial;
+    }
+}
+
+// 用于设置 Material 参数的 MaterialPropertyBlock
+private MaterialPropertyBlock m_FilterCubemapPropertyBlock = new MaterialPropertyBlock();
+
+public void RenderRealtimeReflectionProbe(ScriptableRenderContext context, ReflectionProbe probe, ref RTHandle cubemapTexture)
+{
+    //... 最后面
+    // 完成 mip0 六个面的渲染后，生成 mipmap
+    CommandBuffer cmd = CommandBufferPool.Get();
+    cmd.name = "GenerateMipmaps_IntermediumRT";
+
+    // 生成 mipmap（CommandBuffer.GenerateMips 支持 RenderTexture）
+    cmd.GenerateMips(m_IntermediumRT.rt);
+
+    // 进行卷积操作
+    FilterCubemapGGX(cmd, m_IntermediumRT, cubemapTexture);
+
+    context.ExecuteCommandBuffer(cmd);
+    CommandBufferPool.Release(cmd);
+    context.Submit();
+
+    probe.realtimeTexture = cubemapTexture;
+}
+
+/// <summary>
+/// 使用 GGX 过滤生成各个粗糙度的预过滤环境贴图
+/// </summary>
+/// <param name="cmd">命令缓冲区</param>
+/// <param name="sourceCubemap">源 cubemap (m_IntermediumRT)</param>
+/// <param name="targetCubemap">目标 cubemap (cubemapTexture)</param>
+private void FilterCubemapGGX(CommandBuffer cmd, RTHandle sourceCubemap, RTHandle targetCubemap)
+{
+    if (sourceCubemap == null || sourceCubemap.rt == null || targetCubemap == null || targetCubemap.rt == null)
+        return;
+    
+    // 首先复制 mip0：将 sourceCubemap 的 mip0 复制到 targetCubemap 的 mip0
+    for (int face = 0; face < 6; face++)
+    {
+        cmd.CopyTexture(
+            sourceCubemap.rt, face, 0, // 源：sourceCubemap，面索引，mip0
+            targetCubemap.rt, face, 0  // 目标：targetCubemap，面索引，mip0
+        );
+    }
+    
+    // 获取 Material（会自动检查并创建/更新）
+    Material filterMaterial = filterCubemapMaterial;
+    if (filterMaterial == null)
+        return;
+    
+    
+    // 使用 MaterialPropertyBlock 设置源 cubemap
+    m_FilterCubemapPropertyBlock.SetTexture("_SourceCubemap", sourceCubemap.rt);
+    
+    // 计算 invOmegaP
+    // invOmegaP = 1 / omegaP, where omegaP = FOUR_PI / (6.0 * cubemapWidth * cubemapWidth)
+    int cubemapWidth = sourceCubemap.rt.width;
+    float omegaP = (4.0f * Mathf.PI) / (6.0f * cubemapWidth * cubemapWidth);
+    float invOmegaP = 1.0f / omegaP;
+    m_FilterCubemapPropertyBlock.SetFloat("_InvOmegaP", invOmegaP);
+    
+    // 遍历 mip1 到 mip6，为每个 mip 级别生成预过滤贴图
+    for (int mipLevel = 1; mipLevel <= 6; mipLevel++)
+    {
+        m_FilterCubemapPropertyBlock.SetFloat("_MipLevel", mipLevel);
+        
+        // 遍历六个面
+        for (int face = 0; face < 6; face++)
+        {
+            m_FilterCubemapPropertyBlock.SetFloat("_FaceIndex", face);
+            
+            // 设置渲染目标为 cubemap 的特定 mip 级别和面
+            CoreUtils.SetRenderTarget(cmd, targetCubemap, ClearFlag.None, mipLevel, (CubemapFace)face);
+            
+            // 使用 MaterialPropertyBlock 绘制全屏三角形
+            CoreUtils.DrawFullScreen(cmd, filterMaterial, m_FilterCubemapPropertyBlock);
+        }
+    }
+}
 ```
-创建函数`FilterCubemapGGX`生成各个粗糙度的预过滤环境贴图，将Cubemap作为渲染目标。 具体卷积方法参考URP.Core中 [ImageBasedLighting.hlsl](https://github.com/advancedfx/afx-unity-srp/blob/advancedfx/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl)的函数`IntegrateLD`。 不过这里考虑到每级mip固定只采样34次，一共只存在204个采样点。我这直接将采样点对应的入射方向和立体角定义在hlsl中，而不是原方法中使用LUT图或实时计算。
+> 这里需要使用MaterialPropertyBlock来传递每次循环中filterMaterial参数，否则后续循环通过Material.SetXXX接口设置的参数可能会污染前面几次CoreUtils.DrawFullScreen中提交的filterMaterial参数。
+具体卷积方法参考URP.Core中 [ImageBasedLighting.hlsl](https://github.com/advancedfx/afx-unity-srp/blob/advancedfx/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl)的函数`IntegrateLD`。 
+不过这里考虑到每级mip固定只采样34次，一共只存在204个采样点。我这直接将采样点对应的入射方向和立体角定义在hlsl中，而不是类似原方法使用LUT图或实时计算。 
+创建ShaderLab文件`FilterCube.Shader`, `FilterCubemap.hlsl`, 以及存储Shader的ScriptObject文件`ReflectionProbeResources`.
+``` C#
+using UnityEngine;
+using UnityEngine.Rendering;
+
+namespace UnityEngine.Rendering.Universal
+{
+    /// <summary>
+    /// ScriptableObject for storing reflection probe related shader resources
+    /// </summary>
+    [CreateAssetMenu(fileName = "ReflectionProbeResources", menuName = "Rendering/Universal/Reflection Probe Resources", order = 100)]
+    public class ReflectionProbeResources : ScriptableObject
+    {
+        [SerializeField]
+        [ResourcePath("Shaders/Utils/FilterCubemap.shader")]
+        private Shader m_FilterCubemapShader;
+
+        /// <summary>
+        /// FilterCubemap shader for GGX prefiltering
+        /// </summary>
+        public Shader filterCubemapShader
+        {
+            get => m_FilterCubemapShader;
+            set => m_FilterCubemapShader = value;
+        }
+
+        private static ReflectionProbeResources s_Instance;
+
+        /// <summary>
+        /// Get the instance of ReflectionProbeResources
+        /// </summary>
+        public static ReflectionProbeResources instance
+        {
+            get
+            {
+                if (s_Instance == null)
+                {
+                    // Try to find the asset in the project
+                    #if UNITY_EDITOR
+                    string[] guids = UnityEditor.AssetDatabase.FindAssets("t:ReflectionProbeResources");
+                    if (guids.Length > 0)
+                    {
+                        string path = UnityEditor.AssetDatabase.GUIDToAssetPath(guids[0]);
+                        s_Instance = UnityEditor.AssetDatabase.LoadAssetAtPath<ReflectionProbeResources>(path);
+                    }
+                    #endif
+
+                    // Fallback: try to find in Resources folder
+                    if (s_Instance == null)
+                    {
+                        s_Instance = Resources.Load<ReflectionProbeResources>("ReflectionProbeResources");
+                    }
+                }
+                return s_Instance;
+            }
+        }
+    }
+}
+```
+``` ShaderLab
+Shader "Hidden/Universal Render Pipeline/FilterCubemap"
+{
+    Properties
+    {
+        _SourceCubemap ("Source Cubemap", Cube) = "" {}
+        _InvOmegaP ("Inv Omega P", Float) = 1.0
+    }
+    
+    SubShader
+    {
+        Tags { "RenderType" = "Opaque" "RenderPipeline" = "UniversalPipeline" }
+        LOD 100
+        
+        Pass
+        {
+            Name "FilterCubemapGGX"
+            ZTest Always
+            ZWrite Off
+            Cull Off
+            
+            HLSLPROGRAM
+            #pragma vertex Vert
+            #pragma fragment Frag
+            
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Shaders/Utils/FilterCubemap.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Sampling.hlsl"
+            
+            TEXTURECUBE(_SourceCubemap);
+            SAMPLER(s_trilinear_clamp_sampler);
+            
+            float _InvOmegaP;
+            float _MipLevel; // 当前要生成的 mip 级别 (1-6)
+            float _FaceIndex; // 当前渲染的 cubemap 面索引 (0-5)
+            
+            struct Attributes
+            {
+                uint vertexID : SV_VertexID;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+            
+            struct Varyings
+            {
+                float4 positionCS : SV_POSITION;
+                float2 uv : TEXCOORD0;
+                UNITY_VERTEX_OUTPUT_STEREO
+            };
+            
+            Varyings Vert(Attributes input)
+            {
+                Varyings output;
+                UNITY_SETUP_INSTANCE_ID(input);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
+                
+                // 使用全屏三角形
+                float4 pos = GetFullScreenTriangleVertexPosition(input.vertexID);
+                float2 uv = GetFullScreenTriangleTexCoord(input.vertexID);
+                
+                output.positionCS = pos;
+                output.uv = uv;
+                
+                return output;
+            }
+            
+            float4 Frag(Varyings input) : SV_Target
+            {
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+                
+                // 从 UV 坐标重建 cubemap 方向
+                float2 positionNVC = input.uv * 2.0 - 1.0;
+                
+                // 使用面索引和 UV 坐标重建方向
+                uint faceId = (uint)_FaceIndex;
+                float3 N = CubemapTexelToDirection(positionNVC, faceId);
+                
+                // 计算粗糙度（从 mip 级别映射到粗糙度）
+                // mipLevel 1-6 对应不同的粗糙度级别
+                float perceptualRoughness = MipmapLevelToPerceptualRoughness(_MipLevel);
+                float roughness = PerceptualRoughnessToRoughness(perceptualRoughness);
+                
+                // 对于 cubemap 过滤，我们假设 V == N（视角方向等于法线方向）
+                float3 V = N;
+                
+                // 使用静态采样版本的 IntegrateLD
+                // mipLevelIndex = _MipLevel - 1 (因为 mipLevel 1-6 对应 index 0-5)
+                // 固定使用 34 个样本
+                uint mipLevelIndex = (uint)_MipLevel - 1;
+                float4 result = IntegrateLD_StaticSamples(
+                    TEXTURECUBE_ARGS(_SourceCubemap, s_trilinear_clamp_sampler),
+                    V,
+                    N,
+                    roughness,
+                    _InvOmegaP,
+                    mipLevelIndex
+                );
+
+                return result;
+            }
+            
+            ENDHLSL
+        }
+    }
+}
+```
+``` hlsl
+#ifndef UNITY_FILTER_CUBEMAP_HLSL_INCLUDED
+#define UNITY_FILTER_CUBEMAP_HLSL_INCLUDED
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Fibonacci.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/BSDF.hlsl"
+
+// 预计算的 GGX IBL 样本数据（替代 ggxIblSamples 贴图）
+// 每个元素是 float4(localL.x, localL.y, localL.z, omegaS)
+// 总共 6 个 mip 级别，每个级别 34 个样本
+// 使用统一的数组：6 * 34 = 204 个元素
+
+// 统一的静态数组，包含所有 mip 级别的样本数据
+// 数组索引计算：arrayIndex = mipLevelIndex * 34 + sampleIndex
+static const float4 k_GGXIblSamples[204] = {
+    // 6 mip levels * 34 samples = 204 elements
+    // 格式：float4(localL.x, localL.y, localL.z, omegaS)
+    // Generated by C# Script
+    // Format: float4(localL.x, localL.y, localL.z, omegaS)
+
+    // 具体参考源码
+}
+
+
+// 不使用 ggxIblSamples 贴图的 IntegrateLD 实现
+// 使用静态数组存储预计算的样本数据，不使用 USE_KARIS_APPROXIMATION
+float4 IntegrateLD_StaticSamples(TEXTURECUBE_PARAM(tex, sampl),
+                                 real3 V,
+                                 real3 N,
+                                 real roughness,
+                                 real invOmegaP,
+                                 uint mipLevelIndex) // mipLevel - 1 (0-5)
+{
+    real3x3 localToWorld = GetLocalFrame(N);
+    
+    // 不使用 USE_KARIS_APPROXIMATION，使用精确的 F * G 权重
+    real NdotV = 1; // N == V
+    real partLambdaV = GetSmithJointGGXPartLambdaV(NdotV, roughness);
+    
+    float3 lightInt = float3(0.0, 0.0, 0.0);
+    float  cbsdfInt = 0.0;
+    
+    // 固定使用 34 个样本
+    [unroll]
+    for (uint i = 0; i < 34; ++i)
+    {
+        real3 L;
+        real  NdotL, NdotH, LdotH;
+        
+        // 从静态数组获取预计算的样本数据（使用采样 UV 计算）
+        float4 sampleData = k_GGXIblSamples[mipLevelIndex * 34 + i];
+        real3 localL = sampleData.xyz;
+        real omegaS = sampleData.w;
+        
+        // 转换到世界空间
+        L = mul(localL, localToWorld);
+        NdotL = localL.z;
+        LdotH = sqrt(0.5 + 0.5 * NdotL);
+        
+        if (NdotL <= 0) continue; // 注意：某些样本的贡献为 0
+        
+        // 预过滤的 BRDF 重要性采样
+        // 使用较低的 MIP-map 级别来获取低概率样本，以减少方差
+        // Ref: http://http.developer.nvidia.com/GPUGems3/gpugems3_ch20.html
+        
+        // 'invOmegaP' 在 CPU 上预计算并作为参数提供
+        // real omegaP = FOUR_PI / (6.0 * cubemapWidth * cubemapWidth);
+        const real mipBias = roughness;
+        real mipLevel = 0.5 * log2(omegaS * invOmegaP) + mipBias;
+        
+        // 从 cubemap 采样
+        real3 val = SAMPLE_TEXTURECUBE_LOD(tex, sampl, L, mipLevel).rgb;
+        
+        // 不使用 USE_KARIS_APPROXIMATION，使用精确的 F * G 权重
+        // The choice of the Fresnel factor does not appear to affect the result.
+        real F = 1; // F_Schlick(F0, LdotH);
+        real G = V_SmithJointGGX(NdotL, NdotV, roughness, partLambdaV) * NdotL * NdotV; // 4 cancels out
+        
+        lightInt += F * G * val;
+        cbsdfInt += F * G;
+    }
+    
+    // 防止 0/0 导致的 NaN
+    cbsdfInt = max(cbsdfInt, REAL_EPS);
+
+    return float4(lightInt / cbsdfInt, 1.0);
+}
+
+#endif // UNITY_FILTER_CUBEMAP_HLSL_INCLUDED
+
+```
 > 不过如果反射贴图的尺寸较大，如512*512。34次采样可能不太够。
-> 实测下来Unity原生那套用高斯模糊层级模糊性能上其实不太理想，可能是不必要的blit操作太多了。
+静态数组打成LUT，大概是这样。
+![20260130184409](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260130184409.png)
+> 生成静态数组和对应的LUT的[脚本]（）
+对比Baked和我们自定义的效果

@@ -42,3 +42,4 @@
   - 理论上RTHandle确实只指向color或depth一种资源，但如果作为RenderTarget，其的RT实际又包含 两个 GPU 资源（颜色缓冲区 + 深度模板缓冲区）
   - 为了避免这种混淆，最好不要使用ReAllocateHandleIfNeeded进行创建和管理。
   (https://discussions.unity.com/t/fixing-rendertexturedescriptor-warning/1562637/3)
+- 23： URP中如果在循环提交drawcall时，每次材质的参数都要进行调整的话。要使用 MaterialPropertyBlock， 否则后续的渲染指令通过Material.SetFloat等接口设置的参数，可能会污染前面的渲染指令。（比如使用CoreUtils.DrawFullScreen时）

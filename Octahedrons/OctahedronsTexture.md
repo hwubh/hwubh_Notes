@@ -477,3 +477,34 @@ urp 改默认keyword:
 > D项只是为了确定重要性采样的pdf而引入的？？？
 - Environment BRDF（DFG项，分布 (D)、菲涅尔 (F) 和 几何 (G)）： 存储在LUT图中，记录F的scale和G的bias。通过cosθv​ (N⋅V) 和 粗糙度 (α)进行查找。
 ---------------------------
+
+Unity中如何写Vertex Shader：
+以CoreUtils.DrawFullScreen为例： 使用一个三角形来进行绘制。![20260130155833](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260130155833.png)
+首先通过 
+struct Attributes
+{
+    uint vertexID : SV_VertexID;
+};
+获取到三角形的顶点0， 1， 2.
+然后通过式子
+Varyings Vert(Attributes input)
+{
+    Varyings output;
+    output.positionCS = GetFullScreenTriangleVertexPosition(input.vertexID);
+    return output;
+}
+
+float4 GetFullScreenTriangleVertexPosition(uint vertexID, float z = UNITY_NEAR_CLIP_VALUE)
+{
+    // note: the triangle vertex position coordinates are x2 so the returned UV coordinates are in range -1, 1 on the screen.
+    float2 uv = float2((vertexID << 1) & 2, vertexID & 2);
+    float4 pos = float4(uv * 2.0 - 1.0, z, 1.0);
+#ifdef UNITY_PRETRANSFORM_TO_DISPLAY_ORIENTATION
+    pos = ApplyPretransformRotation(pos);
+#endif
+    return pos;
+}
+得到三角形顶点在屏幕空间的坐标pos的xy项)（-1， -1）， （-1， 3）， （3， -1）
+也可通过
+GetFullScreenTriangleTexCoord 获得0~2空间下的uv坐标。
+然后在片元着色器中使用 CubemapTexelToDirection将uv坐标转为面上uv的世界空间坐标 （屏幕空间 -> 世界空间）
