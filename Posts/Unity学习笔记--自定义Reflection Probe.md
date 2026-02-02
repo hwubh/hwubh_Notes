@@ -1178,4 +1178,40 @@ float4 IntegrateLD_StaticSamples(TEXTURECUBE_PARAM(tex, sampl),
 静态数组打成LUT，大概是这样。
 ![20260130184409](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260130184409.png)
 > 生成静态数组和对应的LUT的[脚本]（）
-对比Baked和我们自定义的效果
+对比Baked，自定义Realtime，和Unity Realtime的效果
+![20260130190140](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260130190140.png)
+> Unity烘培反射探针时好像没有把主光源烘培进去？
+
+
+## 支持分帧渲染
+完成反射探针的渲染后，我们还需支持反射探针的分帧渲染，即`Time Slicing`中的三种模式。
+虽然Unity文档中表示当前`Time Slicing`是分为1，9，和14帧三种，但至少在URP中, 通过Profiler来看实际应该是1，3，和8三种。
+以“All faces at once”为例, 其实际为三帧，第一帧为渲染6个面，第二帧为卷积Mip1， 第三帧为卷积剩下的Mip。
+> 这里为大致推测，因为第二帧卷积部分（ReflectionProbe.Convolution）只有12个“RenderTarget.SetActive”，而第三有102个.
+![20260202104225](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260202104225.png)
+![20260202105853](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260202105853.png)
+![20260202105916](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260202105916.png)
+
+由此，也可以推测出“Individual faces”实际就是将第一帧渲染六个面拆成了6帧来处理，一共为8帧一循环。
+为了让实现分帧的逻辑，在`RealtimeReflectionProbeManager`中使用渲染任务队列来管理。
+构建任务的结构体`ReflectionProbeRenderTask`
+``` C#
+/// <summary>
+/// 反射探针渲染任务
+/// </summary>
+public struct ReflectionProbeRenderTask
+{
+    public ReflectionProbe probe;
+    public ReflectionProbeRenderTaskType taskType;
+    public int faceMask; // 用于 RenderFace 任务，位掩码：bit 0-5 对应 face 0-5，0 表示不适用
+    public int mipMask;  // 用于 ConvolutionMips 任务，位掩码：bit 0-6 对应 mip 0-6，0 表示不适用
+    
+    public ReflectionProbeRenderTask(ReflectionProbe probe, ReflectionProbeRenderTaskType taskType, int faceMask = 0, int mipMask = 0)
+    {
+        this.probe = probe;
+        this.taskType = taskType;
+        this.faceMask = faceMask;
+        this.mipMask = mipMask;
+    }
+}
+```

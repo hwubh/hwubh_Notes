@@ -1,0 +1,34 @@
+RenderGraph: https://zhuanlan.zhihu.com/p/16426740009 
+- Function: 
+  - 自动化的资源管理--解决传统渲染流程的资源的生命周期问题
+  - 可视化的Render Pipeline--为复杂的Pipeline解决Debug的便捷性
+  - 更加自由度更高扩展性更易于渲染的流程--为扩展渲染流程，各种Pass之间的依赖关系提供保障
+- ![20260202155830](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260202155830.png)
+  - 数据结构：把各种渲染需要的Pass抽象成一个简单的节点。然后通过有向无环图的形式进行组织。 -> 每个Operation只关心需要什么资源（Buffer）（进行读取或写入）
+  - 渲染流程： 黄色代表的是当前是一个可以执行的Pass，蓝色代表资源（各种buffer），红色代表写入，绿色代表读取。![20260202160109](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260202160109.png)。 buffer与具体的pass是分离的，这里Gbuffer3可以给Lighting pass， 也可以给Debug view pass，乃至于其他pass进行读取。 存在动态分支-》实际的渲染流程是在编译阶段决定的（即上图中 "Lighting"， “Debug View”两条路径），而传统管线的执行顺序是写死的。
+- Work flow： 
+  - Setup： 声明资源，确定对资源的操作。
+  - Compile: 对RDG的相关资源的生命周期进行自动化的计算 -> 编译生成渲染的具体执行的路径。
+  - Execute: 执行渲染流程
+  - URP中： ？
+    - 通过FrameData可以拿到当前帧的所有数据，并且这里对应Setup阶段
+    - 通过后续的RendererList配置，配置RDG的pass的对象的具体渲染属性，甚至包括对哪一些object进行渲染，进行过滤
+    - 如何使用builder来启用RDG的自动生命周期管理
+    - ExecutePass具体的执行和渲染设置分开的设计解耦合，易扩展的设计思想
+- ![20260202161549](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260202161549.png) 多线程渲染时，如果无法确定确切的结束时间点（如上图的Raw AO） -> RDG在有一个使用这个无法得知时刻点的buffer的pass前进行同步，再对资源进行回收。 即强制等待：RDG 会插入一个屏障（Barrier）或同步信号，强制让 GPU 停下来，确保之前所有可能用到这个 Buffer 的线程都跑完了。安全回收：确认没人用了，才把这块显存放回池子（Pool）里给别人用。
+
+- Render Graph Viewer:
+  - Pass Filter dropdown：
+    - Raster Passes： 最常见的pass， 对应传统的图形渲染管线。 使用 AddRasterRenderPass。
+    - Compute Passes： GPGPU 计算任务（如裁剪、粒子模拟、后期处理中的复杂算子）的pass，  使用 AddComputePass。
+    - Unsafe Passes： 允许你直接使用传统的 CommandBuffer 命令， 使用 AddUnsafePass。
+  - Block信息： 
+    - 绿色：read
+    - 红：write
+    - 绿+红：read+write
+    - 灰： 存在但不读写
+    - 虚线：未创建
+    - 空白： 已回收
+    - Global（地球）图标: 被设置为全局buffer？
+  - pass名称下面的蓝色连在一起，说明这些pass被merge了。
+  - 点击单个pass，白色表示当前选择的pass，蓝色的有依赖关系的pass，闪蓝表示渲染状态兼容可以被合并
