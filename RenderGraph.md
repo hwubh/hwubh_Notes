@@ -32,3 +32,4 @@ RenderGraph: https://zhuanlan.zhihu.com/p/16426740009
     - Global（地球）图标: 被设置为全局buffer？
   - pass名称下面的蓝色连在一起，说明这些pass被merge了。
   - 点击单个pass，白色表示当前选择的pass，蓝色的有依赖关系的pass，闪蓝表示渲染状态兼容可以被合并
+  - URP中frameData 与 Renderer绑定，导致一次相机的渲染只能放在一个renderGraph中。
