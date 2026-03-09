@@ -14,7 +14,7 @@
 - 12：URP的PBR渲染方程：https://blog.csdn.net/linjf520/article/details/122464903 https://zhuanlan.zhihu.com/p/638157345
   - D：GGX： 描述微表面法线N和半角H同向性的比重，粗糙度越高，物体表面越粗糙，N，H同向性越低（反射越不清晰）：![20240614092732](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240614092732.png)
   - G：k:NdotL的过去系数：k = pow(1+roughness,2)*0.5, 粗糙度越高，G值越小![20240614092948](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240614092948.png)
-  - F：光线不同角度入射会有不同反射率：非金属的反射率多在：0.02~0.04；金属的反射率多在：0.7~1.0；金属度越高，F值越大（Lerp = （0.04，albedo，metallic））![20240614094220](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240614094220.png)
+  - F：光线不同角度入射会有不同反射率：非金属的反射率多在：0.02~0.04；金属的反射率多在：0.7~1.0；金属度越高，F值越大（Lerp = （0.04，albedo，metallic））; 入射角越大， F 越大。 ![20240614094220](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240614094220.png)
 - 13：工作流：https://blog.csdn.net/u010281174/article/details/108964117
   - 金属度/粗糙度（M/R）工作流：使用三张贴图来表示PBR的参数
     - BaseColor：非导体的albedo与金属的$F_0$；非金属具有非彩色的镜面反射颜色，而金属具有彩色的镜面反射颜色，即非金属的F0是一个float,金属的F0是一个float3

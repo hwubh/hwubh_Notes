@@ -30,9 +30,9 @@
              因此，通常（相机/贴图）实际记录的是感知亮度。将接收的的物理亮度转化为感知亮度的过程称为**gamma encode**或**Image File gamma**。 将记录的感知亮度转化为物理亮度并发射称为**gamma decode**或**display gamma**。将前两者的乘积（多为*1*），称为**System gamma**。
     - Shader中的处理： 实际运算需现将**感知亮度**（sRGB贴图中的texel值）通过^2.2(**Remove Gamma Correction**)转换成**物理亮度**再实际进行。计算结束后需将结果再通过^0.45(**Gamma Correction**)转化为**感知亮度**。
     - 贴图：一般Diffuse（albedo）为sRBG, 而specular maps、normal maps，light maps，一些HDR格式的图片为线形物理空间（物理亮度）的贴图，以节省转换。
-  - Unity：如果选择了Gamma，那Unity不会对输入和输出做任何处理，换句话说，Remove Gamma Correction 、Gamma Correction都不会发生，除非你自己手动实现；而Linear则对Shaderlab中的*颜色*输入，有[Gamma]前缀的Property变量（如*金属度*）以及在*sRGB Texture*采样前进行Remove Gamma Correction。
-  - Gamma空间：使用非sRGB diffuse图时可以节省一步Remove Gamma Correction运算。
-  - Linear空间：使用sRGB diffuse时美术查看效果方便，shader中可以不用写Remove Gamma Correction。但Remove Gamma Correction必不可少。
+  - Unity：如果选择了Gamma，那Unity不会对输入和输出做任何处理，换句话说，Remove Gamma Correction 、Gamma Correction都不会发生，除非你自己手动实现；而Linear则对Shaderlab中的*颜色*输入，有[Gamma]前缀的Property变量（如*金属度*）以及在*sRGB Texture*采样时进行Remove Gamma Correction。
+  - Gamma空间：使用非sRGB diffuse图时可以节省一步Remove Gamma Correction运算。 -> (8-bit通道里，暗部精度应该会有问题？)
+  - Linear空间：使用sRGB diffuse时美术查看效果方便，shader中可以不用写Remove Gamma Correction。但Gamma Correction必不可少。
 
 - 4：卷积：两个函数（输入函数：f(x), 权值函数：g(x)）的卷积，本质上就是先将一个函数翻转，然后进行滑动叠加。
      卷积的本质就是加权积分, 对于（输入函数：f(x), 权值函数：g(x)）来说，g是f的权值函数，表示输入f各个点对输出结果的影响大小。数学定义∑f(x)g(n-x)中的n-x表示x的权值和什么相关，也可以理解为一种约束。![20240616182256](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240616182256.png)
@@ -64,7 +64,8 @@
     -  边界混合：因为对水平和垂直方向的锯齿不友好，故将偏移距离延伸至更远处。做法是用Dir 向量分量的最小值的倒数，将 Dir1 进行缩放。![20240616234723](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240616234723.png)![20240616234752](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240616234752.png)
   - 缺点：在光照高频(颜色变化很快)的地方不稳定（blend anything that has high enough contrast, including isolated pixels），移动摄影机时，会导致一些闪烁。
   - 可用于几何抗拒齿也可用于shading抗拒齿；使用一个pass即可实现FXAA，非常易于集成；与MSAA相比能节省大量内存；可用于延迟渲染；
-  - 如何缓解FXAA带来模糊感？：https://gamedev.stackexchange.com/questions/104339/how-do-i-counteract-fxaa-blur
+  - 如何缓解FXAA带来模糊感？：https://gamedev.stackexchange.com/questions/104339/how-do-i-counteract-fxaa-blur ; 
+    - Contrast Adaptive Sharpening: 也是使用拉普拉斯算子，只有边缘的黑白图，将该图加会FXAA后的图像。 局部对比度自适应来控制锐化的幅度，对比度越大，锐化程度越大； 此外通过数值钳位（Clamping），确保锐化后的像素依然落在周围像素的取值范围内（经过锐化计算后的新像素值，不能超过周围像素中的最大亮度 (Max) 和 最小亮度 (Min)。）。
     - sharpending？/edge detection： 先用edge detection 计算出高频部分，然后乘以一个sharpness系数，加上FXAA处理后的图片。
 
 - TAA：历史帧的数据来实现抗锯齿，每个像素点有多个采样点，但均摊到多个帧中。
@@ -73,6 +74,9 @@
              **抖动**：通过修改投影矩阵的$m_20 , m_21$项来偏移XY分量。![v2-143d0f5393f5c7b9d9b18eeba2ce66eb_r](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/v2-143d0f5393f5c7b9d9b18eeba2ce66eb_r.png)
     - 混合：因为在HDR空间下作TAA效果抗锯齿效果不佳；在postprocessing后做TAA会影响需要在HDR中计算的bloom等效果；所以开启TAA时需要两次Tone mapping：（下图方案一）![v2-c4ccc37c5541f7a7fe166bc7fafc36b8_720w](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/v2-c4ccc37c5541f7a7fe166bc7fafc36b8_720w.webp)
           最后将历史帧数据，和当前帧数据进行 lerp 混合。
+          > 涉及物理（能量）的操作需要在HDR中做。不涉及的美术效果（如FXAA, 锐化，LUT）在LDR中做。但TAA又需要在后处理前做，所有只能进行两次Tone mapping.
+          > 历史帧 是未经过后处理的画面。
+          > [Survey of Temporal Antialiasing Techniques](http://behindthepixels.io/assets/files/TemporalAA.pdf) 的 <3.3.1. Sample accumulation in HDR color space> 
   - 动态（相机移动，物体静止）： 
     - 重投影：当相机移动后，使用当前帧的深度信息，反算出世界坐标，使用上一帧的投影矩阵，在混合计算时做一次重投影。![v2-b68e86d6db5205544484fe1a6b910da0_r](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/v2-b68e86d6db5205544484fe1a6b910da0_r.png)
       - Reverse Reprojection（重投影）：记录上一帧的MVP矩阵，当前帧渲染时会使用上一帧的MVP矩阵对像素进行反向投影，看是否可以在上一帧的帧缓冲里面找到(此处判断是否找到：根据物体ID、深度等信息)。若找到则复用，未找到则标记为“遮蔽”。（如果是蒙皮mesh，还需要记录骨骼位置）
@@ -86,6 +90,7 @@
     - 解决方式：对采样的历史帧和当前帧数据进行对比，将历史帧数据 clamp/截断 在合理的范围内：读取当前帧数据目标像素周围 5 个或 9 个像素点的Max，Min值作为范围。然后：clamp或clip；在TAA之后进行一次滤波（低通），虽然可以有效减少闪烁，但是会让画面比较模糊。
     - 混合：使用一个可变化的混合系数值来平衡抖动和模糊的效果，当物体的 Motion Vector 值比较大时，就增大 blendFactor 的值，反之则减小![20240625015835](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240625015835.png)
   - https://zhuanlan.zhihu.com/p/479530563；https://zhuanlan.zhihu.com/p/425233743；https://zhuanlan.zhihu.com/p/366494818
+- FSR: 1.0是空间域的。 2.0 是时间域的。 3.0是时间域+补帧。
 
 - 光栅化
   - 如果是按线框来光栅化的话，是根据斜率，当斜率较大时，每步进一个单位的x/y，对应的y/x会步进若干个单位，因为锯齿明显。

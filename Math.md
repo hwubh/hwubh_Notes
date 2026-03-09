@@ -15,6 +15,46 @@
   - https://blog.csdn.net/yinfourever/article/details/109822330
 - 7：OIT: https://blog.csdn.net/qq_35312463/article/details/115827894
 - 8：PBR: https://zhuanlan.zhihu.com/p/53086060
+  - Def: 使用基于物理原理和微平面理论建模的着色/光照模型: ![20260309164409](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260309164409.png)
+  - 光与非光学平坦表面的交互： 如何区分漫反射和次表面散射： 如果像素大小远大于散射距离，则可以把次表面散射近似为漫反射，使用BRDF。 如果像素小于散射距离，为了更真实的着色效果，就需要当作次表面散射现象进行处理， 使用BSDF(BSDF = BRDF + BTDF)?![20260309165303](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260309165303.png)
+  - 物理原理：  基于物理的材质（Material）；基于物理的光照（Lighting）；基于物理适配的摄像机（Camera）
+  - 渲染方程的物理基础是能量守恒定律。在一个特定的位置和方向，出射光 Lo 是自发光 Le 与反射光线之和，反射光线本身是各个方向的入射光 Li 之和乘以表面反射率及入射角。 
+    - 反射方程(The Reflectance Equation)，则是渲染方程的简化的版本，或者说是一个特例。  -》迪士尼原则的BxDF。
+    ![20260309165742](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260309165742.png) 
+  - Diffuse BRDF：常数，一般用lambert？ urp中等于albedo / $\pi$
+  - Specular BRDF: 微平面理论（microfacet theory）的Microfacet Cook-Torrance BRDF -> DFG / 4(n·l)(n·v)
+    - D：GGX： 描述微表面法线N和半角H同向性的比重，粗糙度越高，物体表面越粗糙，N，H同向性越低（反射越不清晰）：![20240614092732](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240614092732.png)
+    - G：k:NdotL的过去系数：k = pow(1+roughness,2)*0.5, 粗糙度越高，G值越小![20240614092948](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240614092948.png)
+    - F：光线不同角度入射会有不同反射率：非金属的反射率多在：0.02~0.04；金属的反射率多在：0.7~1.0；金属度越高，F值越大（Lerp = （0.04，albedo，metallic））; 入射角越大， F 越大。 ![20240614094220](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240614094220.png)
+  - Physically Based Environment Lighting
+    - Diffuse: Irradiance Environment Mapping, 自变量：Normal。 URP中使用球谐函数来计算。 存储1+3+5三阶共9个球谐系数。
+    ```
+    // 简化版的 SH 计算逻辑
+    half3 res = unity_SHAr.www; // L0 常数项
+    res += unity_SHAr.xyz * N.x + unity_SHAg.xyz * N.y + unity_SHAb.xyz * N.z; // L1 线性项
+    res += unity_SHBr.xyz * (N.x * N.y) + ...; // L2 二次项
+    ``` 
+    - Specular: 使用Split Sum Approximation将蒙特卡洛积分公式拆为两个部分：将镜面反射函数的求解，通过蒙特卡洛积分转化为有限个样本的求和。然后将该求和分割为两个和式的乘积（split sum approximate），分布求和式（Pre-Filtered Environment Map） 和 和式（Environment BRDF）。
+      - Prefiltered Environment Map （LD项，Radiance (L) × Distribution (D)） -》 取决于（自变量）反射方向 (ωr​) 和 粗糙度 (α) -> 储存在反射探针中，每级mip对应一个粗糙度。反射方向对应UV。 
+      > D项只是为了确定重要性采样的pdf而引入的？？？
+        - Def： 以该方向为中心，基于特定波束宽度（由粗糙度决定）的“加权亮度平均值”。 -> 粗糙度决定lobe的大小。 GGX影响不同反射方向采样结果的权重。
+      - Environment BRDF（DFG项，分布 (D)、菲涅尔 (F) 和 几何 (G)）： 存储在LUT图中，记录F的scale和G的bias。通过cosθv​ (N⋅V) 和 粗糙度 (α)进行查找。 
+        - URP中使用拟合函数（Karis）来模拟：
+        ``` C
+        // Computes the specular term for EnvironmentBRDF
+        half3 EnvironmentBRDFSpecular(BRDFData brdfData, half fresnelTerm)
+        {
+            float surfaceReduction = 1.0 / (brdfData.roughness2 + 1.0); // G项的模拟
+            return surfaceReduction * lerp(brdfData.specular, brdfData.grazingTerm,  fresnelTerm); // G项的模拟 * F项
+        }
+
+        half3 EnvironmentBRDF(BRDFData brdfData, half3 indirectDiffuse, half3 indirectSpecular, half fresnelTerm)
+        {
+            half3 c = indirectDiffuse * brdfData.diffuse;
+            c += indirectSpecular * EnvironmentBRDFSpecular(brdfData, fresnelTerm);
+            return c;
+        }
+        ``` 
 - 9：延迟渲染：https://zhuanlan.zhihu.com/p/102134614
 - 10: GI: IBL/ PRT/ Light Probe/ Lightmap: https://juejin.cn/post/7026291302547324964#heading-1
 - 11: 资源处理：AssetPostProcesser

@@ -2,7 +2,7 @@
 
 ###Virtual Texture定义:
 - 因为内存/显存使用，带宽消耗等考虑, 选择不将一张巨大的贴图（集）载入内存/显存 ，而是该贴图（集）进行管理，根据场景加载需要的贴图。（在GPU根据场景中的mesh推断，不同于在CPU通过逻辑管理的Texture streaming)（在这种情况可将Virtual Texture 视为场景中唯一使用的贴图， 单独的mesh不再于单一的材质绑定）。 ---》Texture
-- 通过中间索引层（类似于虚拟内存的跳转表），将虚拟地址（Virtual uv）转化为实际坐标（Physical uv）。将mesh与材质/贴图分离，只在材质中保留索引。---》Virtual
+- 通过中间索引层（类似于虚拟内存的跳转表），将虚拟地址（Virtual uv, VT的UV）转化为实际坐标（Physical uv, physical Texture cache的UV）。将mesh与材质/贴图分离，只在材质中保留索引。---》Virtual
 - ---》Virtual Texture
 ![![enter image description here](tflpictures202306tapd_30659243_1687334888_147.png)
 ](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/!%5Benter%20image%20description%20here%5D(tflpictures202306tapd_30659243_1687334888_147.png)%0D%0A.png)
@@ -59,7 +59,7 @@
 - 1：将VT分为相同大小的Sector。离相机近的sectors在Indirect Texture上可以获得更大的page（Virtual image, VI），从而在physical map上占据更多的pages。（在Indirection Texture仍然是每个texel对应physical texture上的一个tile，故更大的VI在physical map对应的面积越大）
 ![<!-- ![20230621104809](httpsraw.githubusercontent.comhwubhPicgoPicsmainimages20230621104809.png) -->
 ![enter image description here](tflpictures202306tapd_30659243_1687335417_326.png)](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/%3C!--%20!%5B20230621104809%5D(httpsraw.githubusercontent.comhwubhPicgoPicsmainimages20230621104809.png)%20--%3E%0D%0A!%5Benter%20image%20description%20here%5D(tflpictures202306tapd_30659243_1687335417_326.png).png)
-- 2：Indrection Texture在空间上不再是连续的，我们无法通过Virtual uv（世界空间坐标）直接推测出其在Indirection Texture上的位置（uv）。需要通过sector 存储的关于Indirection texture的信息（大小，指该VI占据了Indirection Texture的大小，maxTiles）（位置，该VT在Indirection Texture的位置，subTextureIndirectionOffset）得到Virtual image，再找到对应的的physical uv。
+- 2：Indrection Texture在空间上不再是连续的，我们无法通过Virtual uv（世界空间坐标）直接推测出其在Indirection Texture上的位置（uv）。需要通过sector 存储的关于Indirection texture的信息（大小，指该VT占据了Indirection Texture的大小，maxTiles）（位置，该VT在Indirection Texture的位置，subTextureIndirectionOffset）得到Virtual image，再找到对应的的physical uv。
 ![![enter image description here](tflpictures202306tapd_30659243_1687335385_102.png)](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/!%5Benter%20image%20description%20here%5D(tflpictures202306tapd_30659243_1687335385_102.png).png)
 - 3：VI 随着相机靠近/远离调整VI的大小，当VI放大（Upscale）时直接拷贝旧VI的内容（作为更高Mipmap层级的内容）。本身仅重新生成 Mip0 级的VI，初始生成时每4个（2*2）MIP0 VI 的page指向 Mip 1 的一个page上，防止渲染时找不到指向physical Texture的映射，之后在重新更新MIP0 VI的内容指向physical Texture。缩小（Downscale）时直接复用原VI的高层级mipmap。
 ![tapd_30659243_1687335504_957](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/tapd_30659243_1687335504_957.png)
