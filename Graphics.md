@@ -3,19 +3,37 @@
 
 - 2：Texture Compression： https://zhuanlan.zhihu.com/p/634020434; https://zhuanlan.zhihu.com/p/237940807
   - ETC: 人眼对亮度而不是色度更敏感这一事实。 因此，每个子块中仅存储一种基色 (ETC1/ETC2 由两个子块组成) ，但亮度信息是按每个纹素存储的。子块由1个基本颜色值和4个修饰值可以确定出4种新的颜色值。
-    - 2个分块*16bit: 存储1个RGB基色（12bit）, 1bit “diff”， 3bit 修饰位； 16个2位选择器，从四个颜色中选出一个。
-  - DXTC：https://en.wikipedia.org/wiki/S3_Texture_Compression
-    - DXT1: 用于RGB或只有1bit Alpha的贴图 
-      - 4*4*64bit 为一个单位，前32bit存贮颜色的两个极端值(c0,c1)，后32bit分为4*4的lookup page，每个page对应一个pixel和2bit状态符（0:c0; 1: c1; 2:c2(插值的颜色)；3：c3（插值的颜色或transparent, if c0 <= c1））
-    - DXT2/3：在DXT1的基础上多出64bit来描述alpha信息，每个pixel的alpha 4bit存储
+    - 4\*4的像素块分为两个2\*4分块，共占据64bit: 每个分块存储1个RGB基色（12bit）, 1bit “diff”， 3bit 修饰位； 剩下的32位bit包含16个2位选择器，每个像素的颜色根据其二位选择器从四个颜色中选出一个。
+    - RGB ETC1 4 bit ：4 bits/pixel，对RGB压缩比6:1，不支持Alpha，绝大部分安卓设备都支持。
+    - RGB ETC2 4 bit ：4 bits/pixel，对RGB压缩比6:1。不支持Alpha，ETC2兼容ETC1，压缩质量可能更高，但对于色度变化大的块误差也更大，需要在OpenGL ES 3.0和OpenGL 4.3以上版本。 ->利用了 ETC1 中一些“逻辑上不可能出现”的位组合，开辟了三种新模式：
+      - T-Mode & H-Mode：专门处理对比度较高的区域，减少边缘锯齿。
+      - Planar Mode（平面模式）：这是 ETC2 的杀手锏，专门处理平滑渐变（如天空、皮肤），彻底解决了 ETC1 在渐变处的色阶断层问题。
+    - RGBA ETC2 8bit ：8 bits/pixel，对RGBA压缩比4:1。支持完全的透明通道，版本要求同上。 -> ETC2 的基础上多64位来专门储存Alpha通道（EAC）
+    - RGB +1bit Alpha ETC2 4bit ：4 bits/pixel。支持1bit的Alpha通道，也就是只支持镂空图，图片只有透明和不透明部分，没有中间的透明度。 -> 使用1bit 来记录Alpha值，只有0或1，不支持半透。
+    - EAC 只存一共通道： 8 bit 基础值 + 4bit 乘法 + 4bit 修饰表索引(只有三位实际使用，所有只用8种派生值) + 16个3bit选择器。 每个像素有8种派生值选择。
+  - DXTC / BC：https://en.wikipedia.org/wiki/S3_Texture_Compression
+    - DXT1 / BC1: 用于RGB或只有1bit Alpha的贴图 
+      - 4\*4个像素共64bit 为一个单位，前32bit存贮颜色的两个极端值(c0,c1)，后32bit分为4*4的lookup page，每个page对应一个pixel和2bit状态符（0:c0; 1: c1; 2:c2(插值的颜色$\frac{2}{3}c_0 + \frac{1}{3}c_1$)；3：c3（插值的颜色$\frac{1}{3}c_0 + \frac{2}{3}c_1$或transparent(RGBA均为0), if c0 <= c1）） -> 1:6
+    - DXT2/3：在DXT1的基础上多出64bit来描述alpha信息，每个pixel的alpha使用4bit存储， 0-15，共16种选择值。二者的区别只有DXT2计算的颜色值预乘了Alpha值
       - DXT2：color: Premultiplied by alpha
-      - DXT3：独立
-    - DXT4/5: 在DXT1的基础上多出64bit来描述alpha信息，alpha 以类似color的方式存贮，64bit 包含2个4bit 极端值，16个3bit 状态符。
+      - DXT3 / BC2：独立
+    - DXT4/5: 在DXT1的基础上多出64bit来描述alpha信息，alpha 以类似color的方式存贮，64bit 包含2个8bit 极端值，16个3bit 状态符，每个像素有8种插值选项。二者的区别只有DXT4计算的颜色值预乘了Alpha值
+      - DXT4：color: Premultiplied by alpha
+      - DXT5 / BC3：独立
       - if c0> c1, c2~7 插值； if c0 <= c1, c2~5插值，c6=0, c7=255
+    - BC 4/5 : 
+      - BC 4: 使用64位处理单个通道（同处理Alpha的方式）
+      - BC 5: 使用128位处理两个通道（同处理Alpha的方式）
+    - BC6H： 针对RGB16的HDR图。4\*4个像素共128bit. 包含两个48bit的RGB值，和16个2bit选择器。
+    - BC7: 4\*4个像素共128bit. 动态分配位数，有8种模式。
   - PVRTC:
     - 不同于DXT和ETC这类基于块的算法，而将整张纹理分为了高频信号和低频信号，低频信号由两张低分辨率的图像A和B表示，这两张图在两个维度上都缩小了4倍，高频信号则是全分辨率但低精度的调制图像M，M记录了每个像素混合的权重。要解码时，A和B图像经过双线性插值（bilinearly）宽高放大4倍，然后与M图上的权重进行混合。
+    - RGB PVRTC 4 bit ：4 bits/pixel，对RGB压缩比6:1
+    - RGBA PVRTC 4 bit ：4 bits/pixel，对RGBA压缩比8:1
+    - RGB PVRTC 2 bit ：2 bits/pixel，对RGB压缩比6:1
+    - RGBA PVRTC 2 bit ：2 bits/pixel
   - ASTC: https://zhuanlan.zhihu.com/p/158740249
-    - 每块固定使用128bit，块size：4*4~12*12
+    - 每块固定使用128bit，块size：4\*4~12\*12， 压缩率从3：1 ~ 27：1
 
 - 3：Color Space：https://zhuanlan.zhihu.com/p/548826041 ; https://zhuanlan.zhihu.com/p/66558476 ; https://zhuanlan.zhihu.com/p/609569101
   ![20240610133007](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240610133007.png)
@@ -62,6 +80,7 @@
     -  方向判断：计算当前亮度变化的梯度值，即亮度变化最快的方向，就是锯齿边界的法线方向。![20240616234222](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240616234222.png)
     -  混合：沿着切线方向分别向正负方向偏移 UV ，进行两次采样，再平均后作为抗锯齿的结果。![20240616234250](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240616234250.png)
     -  边界混合：因为对水平和垂直方向的锯齿不友好，故将偏移距离延伸至更远处。做法是用Dir 向量分量的最小值的倒数，将 Dir1 进行缩放。![20240616234723](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240616234723.png)![20240616234752](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240616234752.png)
+    > 这一步相当于是对“混合”中的Dir1的重定义，与“混合”是二合一的一步。一步来说，计算Dir1 后就得进行Dir2的计算。 然后再用Dir2去做uv偏移。
   - 缺点：在光照高频(颜色变化很快)的地方不稳定（blend anything that has high enough contrast, including isolated pixels），移动摄影机时，会导致一些闪烁。
   - 可用于几何抗拒齿也可用于shading抗拒齿；使用一个pass即可实现FXAA，非常易于集成；与MSAA相比能节省大量内存；可用于延迟渲染；
   - 如何缓解FXAA带来模糊感？：https://gamedev.stackexchange.com/questions/104339/how-do-i-counteract-fxaa-blur ; 
@@ -111,3 +130,23 @@
                   Fragment阶段是先逐Tile，即该tile所有subpass的fragment都依次执行完毕后，才执行下一个Tile。
   - 注意事项： Tile Memory 容量有限！ 
   - https://www.zhihu.com/question/469595919 https://zeux.io/data/gdc2020_arm.pdf https://zhuanlan.zhihu.com/p/744643395 https://zhuanlan.zhihu.com/p/574540329 https://zhuanlan.zhihu.com/p/640672385 
+
+- Texture Streaming:
+  - def: 根据摄像机的位置只加载对应Mipmap Level的纹理到显存中
+  - 加载的对象： 计算得到的Mip级别及比其更高Mipmap级别
+  - 加载逻辑： 
+    - 当渲染一个使用Mipmap纹理的GO时，CPU将最低Mipmap等级（人为设置）的Mip异步加载到显存中。
+    - GPU先使用这些低级Mipmap渲染GO。
+    - cpu计算出该GO必不可能用到mip等级，比如计算出x意味着只可能会用到x+1 ~ n级Mip，将x+1 ~ n级Mip加载到显存中。
+    - 当GPU对纹理进行采样时，它会根据当前像素的纹理坐标和GPU计算的两个内部值DDX和DDY来确定要使用的Mipmap等级，也就是根据像素在场景中覆盖的实际大小找到与之匹配的Texel大小，根据该Texel大小决定要使用的Mip等级。补充说明，DDX和DDY提供有关当前像素旁边和上方像素的UV的信息，包括距离和角度，GPU使用这些值来确定有多少纹理细节对相机可见。
+  - 纹理异步加载 AUP: 
+  - 纹理支持Mipmap Streaming： 勾选Streaming Mipmaps； （Android上）需要开启LZ4 或LZ4HC 压缩格式 -》 实现异步纹理加载； 调整Mip Map Priority， 设置优先级
+  - Max Level Reduction（初始Mip级别） 与 Memory Budget： Max Level Reduction在Mipmap Streaming System中优先级比Memory Budget高，意味着即使会超出Budget，纹理依旧会加载Max Level Reduction级别的Mip到显存中。
+  - Texture.streamingTextureDiscardUnusedMips： 是否主动卸载无用Mip？不开启时，不用的Mip进入缓存池，等待budget不够用时才卸载。 反之关闭时，不用的直接卸载，节省内存。
+  > 不激活Texture.streamingTextureDiscardUnusedMips的情况下，Mip被丢弃的时机（指已加载的Mip从显存中卸载）应该只有一个，即当前纹理串流预算不足，且需要加载新的Mip Streaming Texture.
+  - 管理策略： 
+    - Non Streamed Texture被加载时，完全加载。
+    - 加载Scene时，如果Budget未满时：Texture会完全加载。 不足时，按Max Level Reduction加载
+    - 动态加载GO Texture在Load和Instantiate时， 首先加载Max Level Reduction级的Mipmap。
+    - 实际渲染GO时， 按照当前空闲的纹理串流预算和摄像机和物体之间的距离等等因素去计算当前需要加载的Mipmap等级。如果Budget足够，则加载计算出的Mipmap等级；如果Budget不足，则依然加载Max Level Reduction级别的Mipmap。 
+    - 运行时，如果新的texture加载时会超预算。以距离摄像机从远到近的顺序重新计算Scene中的所有GO，卸载掉使用了过高级别的Mipmap级别。 如果卸载后空间足够，加载该新texture计算的mipmap级别；如果不够，则加载Max Level Reduction级别的Mipmap。
