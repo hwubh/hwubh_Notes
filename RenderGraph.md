@@ -1,4 +1,4 @@
-RenderGraph: https://zhuanlan.zhihu.com/p/16426740009 
+RenderGraph:
 - Function: 
   - 自动化的资源管理--解决传统渲染流程的资源的生命周期问题
   - 可视化的Render Pipeline--为复杂的Pipeline解决Debug的便捷性
@@ -17,7 +17,7 @@ RenderGraph: https://zhuanlan.zhihu.com/p/16426740009
     - ExecutePass具体的执行和渲染设置分开的设计解耦合，易扩展的设计思想
 - ![20260202161549](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260202161549.png) 多线程渲染时，如果无法确定确切的结束时间点（如上图的Raw AO） -> RDG在有一个使用这个无法得知时刻点的buffer的pass前进行同步，再对资源进行回收。 即强制等待：RDG 会插入一个屏障（Barrier）或同步信号，强制让 GPU 停下来，确保之前所有可能用到这个 Buffer 的线程都跑完了。安全回收：确认没人用了，才把这块显存放回池子（Pool）里给别人用。
 
-- Render Graph Viewer:
+- Render Graph Viewer: https://docs.unity3d.com/6000.3/Documentation/Manual/urp/render-graph-viewer-reference.html#pass-filter-property
   - Pass Filter dropdown：
     - Raster Passes： 最常见的pass， 对应传统的图形渲染管线。 使用 AddRasterRenderPass。
     - Compute Passes： GPGPU 计算任务（如裁剪、粒子模拟、后期处理中的复杂算子）的pass，  使用 AddComputePass。
@@ -34,3 +34,6 @@ RenderGraph: https://zhuanlan.zhihu.com/p/16426740009
   - 点击单个pass，白色表示当前选择的pass，蓝色的有依赖关系的pass，闪蓝表示渲染状态兼容可以被合并
   - URP中frameData 与 Renderer绑定，导致一次相机的渲染只能放在一个renderGraph中。
   - 在一个RenderGraph中无法重复调用一些pass（如m_DrawSkyboxPass），因为只会使用第一次调用该pass的数据。而其数据配置结构（如skyRendererListHandle又是黑箱的）
+
+- 参考资料： https://zhuanlan.zhihu.com/p/16426740009  https://zhuanlan.zhihu.com/p/1923476973243568805 https://zhuanlan.zhihu.com/p/687494216 https://zhuanlan.zhihu.com/p/16426740009 https://zhuanlan.zhihu.com/p/582415505 https://zhuanlan.zhihu.com/p/654648423 https://zhuanlan.zhihu.com/p/20183209762 https://zhuanlan.zhihu.com/p/425830762 https://zhuanlan.zhihu.com/p/721313939 https://zhuanlan.zhihu.com/p/24181086877 https://catlikecoding.com/unity/custom-srp/6-0-0/
+https://zhuanlan.zhihu.com/p/101318415

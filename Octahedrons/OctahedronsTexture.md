@@ -478,7 +478,7 @@ urp 改默认keyword:
 - Environment BRDF（DFG项，分布 (D)、菲涅尔 (F) 和 几何 (G)）： 存储在LUT图中，记录F的scale和G的bias。通过cosθv​ (N⋅V) 和 粗糙度 (α)进行查找。
 ---------------------------
 
-Unity中如何写Vertex Shader：
+Unity中如何写Vertex Shader： https://blog.csdn.net/h5502637/article/details/90271986
 以CoreUtils.DrawFullScreen为例： 使用一个三角形来进行绘制。![20260130155833](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260130155833.png)
 首先通过 
 struct Attributes
@@ -508,3 +508,11 @@ float4 GetFullScreenTriangleVertexPosition(uint vertexID, float z = UNITY_NEAR_C
 也可通过
 GetFullScreenTriangleTexCoord 获得0~2空间下的uv坐标。
 然后在片元着色器中使用 CubemapTexelToDirection将uv坐标转为面上uv的世界空间坐标 （屏幕空间 -> 世界空间）
+
+---------------
+资料：
+https://x.com/SebAaltonen/status/1645830196434436096
+https://www.shadertoy.com/view/43G3Dd
+marbarod.blogspot.com/2015/11/octahedron-mapping-using-mipmap-atlases.html
+https://jcgt.org/published/0003/02/01/paper.pdf
+https://zhuanlan.zhihu.com/p/711117213

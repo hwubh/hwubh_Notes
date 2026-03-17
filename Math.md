@@ -1,6 +1,7 @@
 - 1： Viewing Transformation:
   - https://zhuanlan.zhihu.com/p/144329075
   - https://zhuanlan.zhihu.com/p/122411512
+  - https://zhuanlan.zhihu.com/p/65969162
   - Orthgraphic：Consider scale, then translation (n+f/2（centre） * 2/f-n（scale） = n+f/f-n)
   - Perspective: 
 - 2：剔除Culling与剪裁Clipping： https://blog.csdn.net/qq_33744693/article/details/88704309
@@ -145,5 +146,4 @@
   }
   ```
   - 计算AABB与面的最近距离时，可以通过Dot(extent, Abs(normal))来得到extent在normal的最长投影。原理可以考虑到extent与abs(normal)在各个分量均为整数，其计算结果可以视为extent各个分量的normal上的投影取abs()后的和。
-- 14: 蒙特卡洛积分，重要性采样和GGX： 
-  - 
+- 14: 蒙特卡洛积分，重要性采样和GGX： https://zhuanlan.zhihu.com/p/1959722671534223757 https://zhuanlan.zhihu.com/p/361227286 https://zhuanlan.zhihu.com/p/338103692 https://zhuanlan.zhihu.com/p/695130713 https://zhuanlan.zhihu.com/p/41217212  https://zhuanlan.zhihu.com/p/360420413  https://developer.nvidia.com/gpugems/gpugems3/part-iii-rendering/chapter-20-gpu-based-importance-sampling https://www.cnblogs.com/minggoddess/p/14645677.html https://www.cnblogs.com/dydx/p/8635923.html https://patapom.com/blog/BRDF/PreIntegration/#stating-the-problems https://zhuanlan.zhihu.com/p/104422026 https://agraphicsguynotes.com/posts/sample_microfacet_brdf/ https://www.zhihu.com/question/546947425

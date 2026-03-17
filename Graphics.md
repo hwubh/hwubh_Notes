@@ -1,7 +1,7 @@
 - 1：#Normal #transform #Object_Space #World_Space Stop Using Normal Matrix: https://lxjk.github.io/2017/10/01/Stop-Using-Normal-Matrix.html
     *Tips* :![20240213203944](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240213203944.png) The "M" should be "M<sup>'</sup>"
 
-- 2：Texture Compression： https://zhuanlan.zhihu.com/p/634020434; https://zhuanlan.zhihu.com/p/237940807
+- 2：Texture Compression： https://zhuanlan.zhihu.com/p/634020434; https://zhuanlan.zhihu.com/p/237940807 https://zhuanlan.zhihu.com/p/158740249 https://zhuanlan.zhihu.com/p/1923192571934537263 
   - ETC: 人眼对亮度而不是色度更敏感这一事实。 因此，每个子块中仅存储一种基色 (ETC1/ETC2 由两个子块组成) ，但亮度信息是按每个纹素存储的。子块由1个基本颜色值和4个修饰值可以确定出4种新的颜色值。
     - 4\*4的像素块分为两个2\*4分块，共占据64bit: 每个分块存储1个RGB基色（12bit）, 1bit “diff”， 3bit 修饰位； 剩下的32位bit包含16个2位选择器，每个像素的颜色根据其二位选择器从四个颜色中选出一个。
     - RGB ETC1 4 bit ：4 bits/pixel，对RGB压缩比6:1，不支持Alpha，绝大部分安卓设备都支持。
@@ -131,7 +131,7 @@
   - 注意事项： Tile Memory 容量有限！ 
   - https://www.zhihu.com/question/469595919 https://zeux.io/data/gdc2020_arm.pdf https://zhuanlan.zhihu.com/p/744643395 https://zhuanlan.zhihu.com/p/574540329 https://zhuanlan.zhihu.com/p/640672385 
 
-- Texture Streaming:
+- Texture Streaming:  https://zhuanlan.zhihu.com/p/600257663
   - def: 根据摄像机的位置只加载对应Mipmap Level的纹理到显存中
   - 加载的对象： 计算得到的Mip级别及比其更高Mipmap级别
   - 加载逻辑： 
@@ -150,3 +150,5 @@
     - 动态加载GO Texture在Load和Instantiate时， 首先加载Max Level Reduction级的Mipmap。
     - 实际渲染GO时， 按照当前空闲的纹理串流预算和摄像机和物体之间的距离等等因素去计算当前需要加载的Mipmap等级。如果Budget足够，则加载计算出的Mipmap等级；如果Budget不足，则依然加载Max Level Reduction级别的Mipmap。 
     - 运行时，如果新的texture加载时会超预算。以距离摄像机从远到近的顺序重新计算Scene中的所有GO，卸载掉使用了过高级别的Mipmap级别。 如果卸载后空间足够，加载该新texture计算的mipmap级别；如果不够，则加载Max Level Reduction级别的Mipmap。
+  
+- IBL: - 15： IBL: https://zhuanlan.zhihu.com/p/66518450 https://zhuanlan.zhihu.com/p/69380665 https://zhuanlan.zhihu.com/p/56063836  https://zhuanlan.zhihu.com/p/563676455 https://zhuanlan.zhihu.com/p/144438588 https://www.pauldebevec.com/ReflectionMapping/IlluMAP84.html https://research.nvidia.com/sites/default/files/pubs/2017-02_Real-Time-Global-Illumination/light-field-probes-final.pdf
