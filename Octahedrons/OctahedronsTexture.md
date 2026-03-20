@@ -516,3 +516,6 @@ https://www.shadertoy.com/view/43G3Dd
 marbarod.blogspot.com/2015/11/octahedron-mapping-using-mipmap-atlases.html
 https://jcgt.org/published/0003/02/01/paper.pdf
 https://zhuanlan.zhihu.com/p/711117213
+https://www.alexisgiard.com/icosahedron-sphere/
+https://github.com/mabuware/CubeMapToOctMap/tree/master http://www.xionggf.com/post/cg/octahedron_mapping/ https://gamedev.stackexchange.com/questions/169508/octahedral-impostors-octahedral-mapping
+siggraph_mmg_2024_HypeHype https://gpuopen.com/learn/fetching-from-cubes-and-octahedrons/
