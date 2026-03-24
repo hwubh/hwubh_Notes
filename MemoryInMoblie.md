@@ -44,7 +44,7 @@ TBDR
   - **FPK**（Forward Pixel Kill）（**Mali** GPU）： 光栅后，着色前，通过了Early-Z的片元先进一个FIFO队列，如果有相同位置的片元进入队列，则抛弃前一个片元（因为后进入FIFO的，是刚经过EZ test 并且通过的）。
     > FIFO队列的深度是有限的，如果一个Tile中的片元较多的话，可能出现队列满了，不得不把最前的出队进行渲染的问题。
     - 四代以前：Mali GPU的顶点着色也是分两次的，第一次只计算位置相关的，用于分块操作。 第二次在Binning pass阶段会计算所有非位置的顶点属性（如纹理坐标、法线、颜色等）。 最后将这些 VS Output 写入系统内存。
-    - 第五代加个开始引入了延迟顶点着色（Deferred Vertex Shading, **DVS**）: Binnings pass中只处理位置相关的顶点着色，然后将分块的图元列表写入系统内存，但不写入VS Output。 Rendering pass 阶段，Tile读取对应的图元列表和原始顶点数据，重新执行 Varying Shading，将计算出的顶点属性直接存储在片上高速缓存中。
+    - 第五代加个开始引入了延迟顶点着色（Deferred Vertex Shading, **DVS**）: Binnings pass中只处理位置相关的顶点着色，然后将分块的图元列表写入系统内存，但不写入VS Output。 Rendering pass 阶段，Tile读取对应的图元列表和原始顶点数据，重新执行 Varying Shading，将计算出的顶点属性直接存储在片上高速缓存中。![20260320104702](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260320104702.png)
   - **LRZ pass**（Low Resolution Z pass pass）（**高通** Adreno）： 在分块阶段（binning pass），会构建一个低分辨率深度缓冲区（Z-buffer），该缓冲区可对 “LRZ 分块（LRZ-tile）” 范围内的渲染贡献进行剔除，从而提升分块阶段的性能。随后在渲染阶段（rendering pass），会先利用这个低分辨率深度缓冲区高效剔除像素，再与全分辨率深度缓冲区进行深度测试。片元着色器直接从片上缓存读取顶点属性进行插值，无需从系统内存读取。
     - 关于VS中LRZ的影响, VS阶段只读取顶点的位置数据进行着色,用于深度(可见性)测试? 完成测试后, 将可见片元分配到相应的图块列表. 每个图块包含哪些图元的索引信息和每个图元的可见性. 后续还需在FS阶段对可见片元正式进行完整的顶点着色计算。 虽然 VS 执行了两次，但宁愿多算一次顶点（计算成本相对较低），也要避免将 VS Output 写入系统内存再读回来（带宽成本极高）。
     > 相较于HSR, FPK, LRZ还多了在Binning阶段的优化，LRZ构建的低分辨率depth buffer（LRZ buffer）在Binning阶段和Rendering阶段的着色前都会进行根据LRZ buffer进行深度测试。

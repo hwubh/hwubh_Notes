@@ -152,3 +152,56 @@
     - 运行时，如果新的texture加载时会超预算。以距离摄像机从远到近的顺序重新计算Scene中的所有GO，卸载掉使用了过高级别的Mipmap级别。 如果卸载后空间足够，加载该新texture计算的mipmap级别；如果不够，则加载Max Level Reduction级别的Mipmap。
   
 - IBL: - 15： IBL: https://zhuanlan.zhihu.com/p/66518450 https://zhuanlan.zhihu.com/p/69380665 https://zhuanlan.zhihu.com/p/56063836  https://zhuanlan.zhihu.com/p/563676455 https://zhuanlan.zhihu.com/p/144438588 https://www.pauldebevec.com/ReflectionMapping/IlluMAP84.html https://research.nvidia.com/sites/default/files/pubs/2017-02_Real-Time-Global-Illumination/light-field-probes-final.pdf https://www.cnblogs.com/KillerAery/p/16828304.html#reflection-probe https://www.zhihu.com/question/63086916 https://zhuanlan.zhihu.com/p/404520592
+
+- Occlusion Culling: https://zhuanlan.zhihu.com/p/363277669 https://zhuanlan.zhihu.com/p/701883987 https://zhuanlan.zhihu.com/p/842429737
+  - 预计算可见性/Precomputed Visibility: 适用于静态物体。 将场景划分为一个个Cell, 每个Cell会将可见的静态物体的ID记录在其对应的Bit Array中。 运行时，根据相机在哪个Cell中，则取出对应的Bit Array，可以知道有哪些静态物体是可见的。
+    > 如果要存在动态物体，则需要实时计算该物体所在的cell。然后根据Cell之间的可见性信息，判断可见性。
+  - Portal-Culling： 适用于静态物体。 将场景划分为一个个Cell，每个cell记录它直接相邻的Portal，和通过Portal能连接到哪些cell。 因为Cell的大小不一定时固定的，可以通过八叉树来储存Cell的index，用于后续的查找。 运行时，通过相机位置找到所在的Cell。先计算portal的AABB是否与视锥体相机，如果相交的话，则根据该portal与相机构建一个新的视锥体，用于下一次递归中的视锥体。 
+    每个Cell会维护一个静态物体的列表和一个动态问题的列表。 对于动态物体，会根据其位置，实时更新其到其对应的Cell上。运行时，如果所在的Cell联通了，还需要用Portal构架的新视锥体与该Cell上记录的动态物体进行求交测试。 
+    如果要计算动态物体的遮挡的话，可以将其渲染到低分辨率的深度图上。在判断Cell或物体的相连情况时，参考该深度图。（Software Occlusion的思路）
+    > 可以通过调整Portal的开关来模拟门的开关。
+  - 硬件遮挡查询： 使用一个depth-only pass将深度写入Z-buffer中，然后传入物体到GPU进行遮挡剔除。  在GPU内三角形会被光栅化，其结果与z-buffer比较但不会写入深度，标记其可见像素数量n，如果n=0代表物体会被完全遮挡需要被剔除掉。 最后再把信息传回CPU进行剔除。
+    - 用于depth-only pass渲染的物体使用包围盒或proxy mesh代替。
+    - depth only pass 可以使用一个材质来统一绘制。
+    - 粗糙深度测试： 利用硬件层面的 Tile 优化，如果一个区域的深度值远小于物体，直接判定为遮挡，连像素级别的比对都省了。
+    - 查询逻辑优化 (Binary Query)： 如果有一个像素通过了剔除，则省略后续该物体上其他像素的测试。
+    - 解决回读延迟： 下一帧再用 或 对于支持断言/条件（predicated/conditional）的遮挡查询的API（如DX, OpenGL）, GPU可以记录遮挡插混后可见的物体的ID。后续提交的物体如果不在可见列表，也不会渲染。
+  - Hierarchical Z Buffer:
+    准备 Hierachical Z-Buffer: 获取一张遮挡体的深度信息的深度图。通过将采用声明Mipmap。Mipmap存储的是深度的最大值而不是平均值。
+    > 只渲染遮挡体可能导致深度图上的一些像素缺少深度信息（出现所谓的“**洞**”）。《大革命》中选择默认值为0，这可能导致出现错误剔除。 但填入1的话，会导致高级别Mipmap的取值皆为1.
+    遮挡查询：被遮挡体的包围盒投影到屏幕空间，然后找到一个mipmap层级使其包围盒只覆盖2x2个像素。 首先将被遮挡体的包围盒的顶点，变换到屏幕空间，得到屏幕空间中uv方向的包围盒。 根据该包围盒在Mip0的UV方向覆盖了多少个像素（覆盖像素较多的那个方向），计算并选择合适的Mipmap层级进行深度比较。 使用包围的顶点作为uv坐标，采用Mipmap层的深度图进行深度比较，如果四个深度值都比顶点的深度小，则说明该被遮挡体被遮挡了，需要被剔除。
+    - 大革命： 挑选最近300个遮挡提做全屏渲染深度，用于Hi-z和 Early-Z。 同时这张图可以与经过了重映射的上一帧深度图之间进行互相补“**洞**”的操作。
+      - Shadowmap相机进行遮挡剔除： 将主相机的深度图均分为等大的Tile（日16*16），选择深度最大的Z值。结合近平面的Z值，深度最大的Z，与Tile在相机空间的XY值构成一个长方体。使用该长方体作为阴影贴图相机的遮挡体。
+    - Two-Phase Occlusion Culling就是：第一阶段用上一帧的depth pyramid先剔除一遍物体， 渲染可见物体，第二阶段先生成当帧的depth pyramid，再用新的depth pyramid重新剔除第一阶段已经被剔除掉的物体，渲染上一帧不可见，但是这一帧可见的物体。
+  - Software Occlusion Culling: 
+    将遮挡体经过视锥，背面剔除后的结果光栅后记录全分辨率的深度。然后以Tile为单位进行将分辨率，每个Tile的最大深度对应降分辨率Depth Buffer的一个像素的深度。
+    对被遮挡体包围盒进行视锥剔除，剔除结果变换到屏幕空间，用包围盒的最小深度与包围盒覆盖的Tile的最大深度进行比较。如果包围盒的最小深度比Tile的最大深度还大，说明这遮挡，可以剔除。
+    - Masked Software Occlusion Culling （MSOC）: 
+    将划分为矩形Tile（32*8），充分利用CPU的SIMD特性（这里为8路SIMD,每路32通道），一次性输出一整个Tile的结果。
+    每个Tile用两个float Z0max和Z1max 来表示深度，和32位的mask来表示这个Tile上各个像素是用Z0max还是Z1max。 因为Tile存储的是深度是一个范围，不需要保留全分辨率的深度图也能得到比较好的裁剪精度。
+      - 光栅化： 
+        会计算顶点的数值确定三角形覆盖的Tile，每个Tile只需要计算一次边缘方程，通过递增递减的形式快速求出后续的覆盖情况。 
+        通过scanline对三角形进行扫描并光栅化。
+        每个SIMD单元负责32×1或者8×4个像素的处理逻辑。!   [20260324153112](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260324153112.png)
+        将三角形未覆盖的区域的Mask设置未0。反之为1？
+      - 计算Hierarchical Depth Buffer和遮挡剔除：
+         每个Tile只存3个数据，两个浮点数Z0max，Z1max和32位的mask（uint）。 Z1max叫做Working Layer，记录的时近处物体的最大深度。 Z0max为Reference Layer，记录的是整个Tile的最大深度。mask用于标记当前像素使用哪个Zmax。 ![20260324154158](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260324154158.png)
+         深度大于Z0max的三角形会被直接剔除，处于Z0max和Z1max之间的三角形会进行光栅化且更新Z1max的深度。 ![20260324154300](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260324154300.png)
+         如果三角形的深度要远小于Z1max和Z0max，这意味着该三角形可能属于近景的物体，大概率整个物体都不会被剔除掉，这时需要把mask的值设置为全部取0，且Z1max移动到近裁剪面 ![20260324154424](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260324154424.png)
+         当Z1max1的值铺满整个屏幕（mask全部取同一值），这个时候就会用Z1max覆盖Z0max的值。
+         > 如果不使用 Mask，软件遮挡剔除（SOC）每画一个三角形都要去更新全局深度图，CPU 的同步开销很大。
+         **将光栅化和遮挡剔除合并在一个步骤中**。 通过Z0max对物体包围盒进行剔除，
+  - GPU-Driven Pipeline: 在GPU中做遮挡剔除的计算。
+    - CPU 粗糙视锥剔除: 做视锥体剔除和用软光栅在CPU做粗糙的遮挡剔除, 减少上传大GPU的Buffer尺寸。
+    - CPU 合并Instance： 将不同mesh合并为为一个Instance。（Merge Instancing： 可以是所有参与合并的Mesh，在Vertex Buffer中占据相同大小的空间。 用于后续通过Vertex Buffer计算处Instance ID）
+    - CPU 通过哈希合并Drawcall: 将不同材质参数，PSO数据（每个PSO对应一个shader变体）通过哈希的形式压缩一个Buffer中， 通过实例的Instance_id查找对应的数据。 合并到一个Drawcall中进行提交。
+    - GPU Instance Culling: 在GPU中进行Instace颗粒的视锥剔除和遮挡剔除。遮挡剔除可以使用Hi-z.
+    - GPU 拆分为Chunk（可选）： 当Instance 直接拆分位Cluster时数量过多时，可以先将Instacne拆分为Chunk作为中间层。 每个Chunk中包含64个Cluster。 以平衡不同Warp上的工作量（如果每个Warp分配一个Instance的话）
+    - GPU 拆分为Cluster: 64个三角形组成一个Cluster， 每个线程处理一个cluster。 极限技术Cluster的包围盒在屏幕上的投影， 与Hi-z进行深度测试。 另外可以对通过了测试的Clusetr进行排序，尽可能保证从近到远的顺序，方便后续的early-z。 
+    - GPU 三角形剔除：对于三角形可以采用多种剔除方法，下图中包含背面剔除，细节剔除，深度提出，小图元剔除，视锥体剔除等，这些更细粒度的剔除需要考虑场景来组合使用。![20260324171054](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260324171054.png)
+    - GPU 合并Index: 将通过了剔除的三角形或Cluster重新打包。 将所有通过测试的三角形索引（每 3 个索引为一个单位）依次写入一个新的、连续的 RWStructuredBuffer 中。 在写入紧凑 Buffer 的同时，系统通常会按照**材质（PSO/Instance）**进行分组，作为不同的Drawcall，调用DrawIndirect提交绘制。
+    - 交错式顶点buffer： 将instance 中不同的顶点属性放在不同的buffer中储存。提升hit rate。
+
+
+- 
+- 
