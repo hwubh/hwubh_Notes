@@ -153,7 +153,7 @@
   
 - IBL: - 15： IBL: https://zhuanlan.zhihu.com/p/66518450 https://zhuanlan.zhihu.com/p/69380665 https://zhuanlan.zhihu.com/p/56063836  https://zhuanlan.zhihu.com/p/563676455 https://zhuanlan.zhihu.com/p/144438588 https://www.pauldebevec.com/ReflectionMapping/IlluMAP84.html https://research.nvidia.com/sites/default/files/pubs/2017-02_Real-Time-Global-Illumination/light-field-probes-final.pdf https://www.cnblogs.com/KillerAery/p/16828304.html#reflection-probe https://www.zhihu.com/question/63086916 https://zhuanlan.zhihu.com/p/404520592
 
-- Occlusion Culling: https://zhuanlan.zhihu.com/p/363277669 https://zhuanlan.zhihu.com/p/701883987 https://zhuanlan.zhihu.com/p/842429737
+- Occlusion Culling: https://zhuanlan.zhihu.com/p/363277669 https://zhuanlan.zhihu.com/p/701883987 https://zhuanlan.zhihu.com/p/842429737 https://zhuanlan.zhihu.com/p/565197985
   - 预计算可见性/Precomputed Visibility: 适用于静态物体。 将场景划分为一个个Cell, 每个Cell会将可见的静态物体的ID记录在其对应的Bit Array中。 运行时，根据相机在哪个Cell中，则取出对应的Bit Array，可以知道有哪些静态物体是可见的。
     > 如果要存在动态物体，则需要实时计算该物体所在的cell。然后根据Cell之间的可见性信息，判断可见性。
   - Portal-Culling： 适用于静态物体。 将场景划分为一个个Cell，每个cell记录它直接相邻的Portal，和通过Portal能连接到哪些cell。 因为Cell的大小不一定时固定的，可以通过八叉树来储存Cell的index，用于后续的查找。 运行时，通过相机位置找到所在的Cell。先计算portal的AABB是否与视锥体相机，如果相交的话，则根据该portal与相机构建一个新的视锥体，用于下一次递归中的视锥体。 
@@ -166,6 +166,7 @@
     - 粗糙深度测试： 利用硬件层面的 Tile 优化，如果一个区域的深度值远小于物体，直接判定为遮挡，连像素级别的比对都省了。
     - 查询逻辑优化 (Binary Query)： 如果有一个像素通过了剔除，则省略后续该物体上其他像素的测试。
     - 解决回读延迟： 下一帧再用 或 对于支持断言/条件（predicated/conditional）的遮挡查询的API（如DX, OpenGL）, GPU可以记录遮挡插混后可见的物体的ID。后续提交的物体如果不在可见列表，也不会渲染。
+      > Coherent Occlusion Culling中：将渲染队列分为上一帧可见的，和上一帧不可见的。 上一帧可见的直接绘制，并给不可见的发送查询请求。 查询请求则在CPU 处理好Drawcall提交，GPU正在绘制时的时间，由CPU完成查询，并补上可见物体的绘制请求。
   - Hierarchical Z Buffer:
     准备 Hierachical Z-Buffer: 获取一张遮挡体的深度信息的深度图。通过将采用声明Mipmap。Mipmap存储的是深度的最大值而不是平均值。
     > 只渲染遮挡体可能导致深度图上的一些像素缺少深度信息（出现所谓的“**洞**”）。《大革命》中选择默认值为0，这可能导致出现错误剔除。 但填入1的话，会导致高级别Mipmap的取值皆为1.
@@ -173,6 +174,11 @@
     - 大革命： 挑选最近300个遮挡提做全屏渲染深度，用于Hi-z和 Early-Z。 同时这张图可以与经过了重映射的上一帧深度图之间进行互相补“**洞**”的操作。
       - Shadowmap相机进行遮挡剔除： 将主相机的深度图均分为等大的Tile（日16*16），选择深度最大的Z值。结合近平面的Z值，深度最大的Z，与Tile在相机空间的XY值构成一个长方体。使用该长方体作为阴影贴图相机的遮挡体。
     - Two-Phase Occlusion Culling就是：第一阶段用上一帧的depth pyramid先剔除一遍物体， 渲染可见物体，第二阶段先生成当帧的depth pyramid，再用新的depth pyramid重新剔除第一阶段已经被剔除掉的物体，渲染上一帧不可见，但是这一帧可见的物体。
+    > 快速移动相机时的处理方法:
+      重投影
+      预先遮挡体
+      Two-Phase
+      检测相机的旋转角速度：如果速度未超过阈值，则使用重投影的hiz图进行剔除。如果超过了阈值，调整depth bias? 帮运行离相机近的物体作为Occluder。
   - Software Occlusion Culling: 
     将遮挡体经过视锥，背面剔除后的结果光栅后记录全分辨率的深度。然后以Tile为单位进行将分辨率，每个Tile的最大深度对应降分辨率Depth Buffer的一个像素的深度。
     对被遮挡体包围盒进行视锥剔除，剔除结果变换到屏幕空间，用包围盒的最小深度与包围盒覆盖的Tile的最大深度进行比较。如果包围盒的最小深度比Tile的最大深度还大，说明这遮挡，可以剔除。
@@ -202,6 +208,49 @@
     - GPU 合并Index: 将通过了剔除的三角形或Cluster重新打包。 将所有通过测试的三角形索引（每 3 个索引为一个单位）依次写入一个新的、连续的 RWStructuredBuffer 中。 在写入紧凑 Buffer 的同时，系统通常会按照**材质（PSO/Instance）**进行分组，作为不同的Drawcall，调用DrawIndirect提交绘制。
     - 交错式顶点buffer： 将instance 中不同的顶点属性放在不同的buffer中储存。提升hit rate。
 
-
-- 
+- 全局光照 Global Illuminance (**GI**): GI = 直接光照 + 间接光照 + 环境光照
+  - 环境光的漫反射部分：
+    - irradiance map: 通过蒙特卡洛积分，积分整个半球上的，方向分布遵从余弦加权分布采样 (Cosine-weighted Sampling)。 
+    - 球谐函数： 将一个球面函数，进行投影/projection后，得到球谐系数。然后又可以从球谐系数重构/reconstrcution出原函数的近似。
+      - 一般分为三阶，九个系数：
+        - 第一阶： 一个系数：无方向性的环境光均值。
+        - 第二阶： 3个系数，对应可见中的XYZ轴： 表示主光源的方向偏好，可以模拟处明暗面
+        - 第三节： 5个系数： 细节修正	产生平滑的颜色过渡和光影对比
+      - 消除振铃效应：导致弱光的一侧出现负值的黑边或光照不连续 -> 相当于为了拟合波峰（高光过亮），将高阶系数调大，导致了下冲（Under shoot）的情况。
+        - Windowing： 给高阶因子乘以衰减因子。
+        - Clamp: UE 取最强方向对面光照的光强度作为最小光强度，将最小光强度 clamp 到至少最强光的 5%。
+  - 环境光的高光部分： IBL的环境高光： Radiance map ？ -> 反射探针？ split-sum来算不同粗糙度的？
+    - 误差： 高光技术拆分为两个可以预积分部分你的误差。（左边是表示各个方向光照的辐照度汇总, 右边是BRDF的汇总）， 和假设 N = R = V的误差。
+    - BRDF项的积分结果可以使用近似函数代替。(模拟G*F)
+  - 环境光遮蔽/AO: 
+    - Baking AO： 烘焙到贴图或顶点上。
+      - 烘培进lightmap： （技术镜面反射时）可以通过当前采样点的lightmap亮度/环境平均亮度 算出遮挡比例，用于把采样反射探针得到的高光信息也按比例遮挡。
+      - 烘培为单独贴图：兼顾动态环境-> 最终环境光=实时环境光颜色×AO贴图采样值。
+      - AO 贴图 + Bent Normal： 允许离特定方向（Bent Normal）较近的光线进入。
+    - SSAO: 必须有 depth-buffer ， 选有normal-buffer
+      - depth： 使用球形分布（有normal时只生成半球？）的采样点，在目标像素周围，视图空间内，在一定半径内的球行内部进行 N 几个采样点的采样，然后将采样点映射到屏幕空间，和 depth-buffer 中的深度进行比较，记深度测试通过的点个数为 M，得到AO系数为$\frac{M}{N}$。
+      - Normal: 在切空间的正半球布置随机点。 计算采样点与球心和normal的cos值，作为权重。
+    - Volumetric obscurance： 在目标周围点确定一个球体，将球体中的被占据的体积比例作为Volumetric obscurance 系数![20260325172957](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260325172957.png)
+      - 如果考虑normal：则取目标点法线上方切空间中一个球形的占据比例![20260325173029](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260325173029.png)
+    - HBAO: RAY-MARCHING 发射射线找离距离水平地面最高的点
+      ![20260325173925](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260325173925.png)  
+    - GTAO: 在屏幕空间方向上寻找“视界线”（Horizon Angles）。 
+      - 扫描方向： 在屏幕像素周围旋转采样（比如取 4~8 个方向 ϕ）。
+      - 寻找切线角： 在每一个方向上，步进采样深度缓冲，找到左右两个方向上遮挡最严重的“地平线角度” h1​ 和 h2​。
+      - 物理积分： 得到了这两个角度，就意味着你知道了从这个点看出去，有多少“天空”是露出来的。
+      ![20260325174145](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260325174145.png) 
+      - Multi-bounce（多重弹跳） 模拟： 将原本单一的遮蔽值（AO），根据材质的 反照率（Albedo/BaseColor） 进行了一次非线性的映射。
+  - lightmap（irradiance map）： 针对静态物体，离线烘培其光照信息，包含了直接光+间接光+阴影？ -> 只存了漫反射信息？
+  - light probe: 用于环境光照的漫反射部分。 储存3阶9个float3。 把分散的探针连接成一个个四面体。 
+    - 逐物体的：根据角色中心点P在四面体中的中心坐标计算插值得到的球谐系数。 每个Mesh共用一个球谐戏数？
+    - LPPV / Volume： 逐像素的： 在物体周围生成一个隐形的网格。每个网格点中都有一份插值好的球谐系数。 着色计算时，根据片元的世界坐标去网格中做3D 线性插值。
+    - 漏光： 室内外分开烘焙，门口做过度处理。
+            设置室内外标记，记录权重值。 计算重心坐标时卡奥率权重值。 
+  - Irradiance Volume / Volumetric Lightmap： 使用3D 纹理，思路类似Light probe/ LPPV： 不过使用二阶球谐系数来储存光照信息。
+  - Precomputed Radiance Transfer(PRT):离线环境从每个Probe发射大量的射线，以预计算整个场景的Albedo Emission等色彩信息，同时再发出少量射线，将碰撞到的采样点的位置和法线储存下来，在运行时计算这些采样点的受光情况（天光，太阳光，局部光等），将这些光照信息乘到提前烘焙好的albedo，并叠加emission，最后得到一个看起来像那么回事的plausible的结果
+    - 拆分色彩部分的计算和灯光可见度的计算： 
+      对于可见性（几何与材质），因为场景的物体位置，颜色，自发光，遮挡关系等是固定的，可以将这部分烘培进probe里。 得到预计算的传输系数。
+      对于颜色部分（光源）:如主光源方向，skybox等颜色等颜色相关的，则是动态计算的。实时把当前的太阳光、天光也转化为一组 SH 系数。
+      最终光照=预计算的传输系数⋅实时灯光系数
+  - Dynamic Diffuse Global Illumination: 通过硬件加速计算传输系数。
 - 
