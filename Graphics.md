@@ -204,7 +204,9 @@
     - GPU Instance Culling: 在GPU中进行Instace颗粒的视锥剔除和遮挡剔除。遮挡剔除可以使用Hi-z.
     - GPU 拆分为Chunk（可选）： 当Instance 直接拆分位Cluster时数量过多时，可以先将Instacne拆分为Chunk作为中间层。 每个Chunk中包含64个Cluster。 以平衡不同Warp上的工作量（如果每个Warp分配一个Instance的话）
     - GPU 拆分为Cluster: 64个三角形组成一个Cluster， 每个线程处理一个cluster。 极限技术Cluster的包围盒在屏幕上的投影， 与Hi-z进行深度测试。 另外可以对通过了测试的Clusetr进行排序，尽可能保证从近到远的顺序，方便后续的early-z。 
-    - GPU 三角形剔除：对于三角形可以采用多种剔除方法，下图中包含背面剔除，细节剔除，深度提出，小图元剔除，视锥体剔除等，这些更细粒度的剔除需要考虑场景来组合使用。![20260324171054](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260324171054.png)
+    - GPU 三角形剔除：对于三角形可以采用多种剔除方法，下图中包含背面剔除，深度剔除，小图元剔除（细节剔除），视锥体剔除等，这些更细粒度的剔除需要考虑场景来组合使用。
+      > 小图元剔除 （Small Primitive Culling）： 根据三角形构建AABB盒，如果AABB中不存在任何一个像素中心（采样点？ MSAA会导致剔除数量减少，进而导致Quad Overdraw），则将该图元剔除。 http://filmicworlds.com/blog/decoupled-visibility-multisampling/
+      ![20260324171054](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260324171054.png)
     - GPU 合并Index: 将通过了剔除的三角形或Cluster重新打包。 将所有通过测试的三角形索引（每 3 个索引为一个单位）依次写入一个新的、连续的 RWStructuredBuffer 中。 在写入紧凑 Buffer 的同时，系统通常会按照**材质（PSO/Instance）**进行分组，作为不同的Drawcall，调用DrawIndirect提交绘制。
     - 交错式顶点buffer： 将instance 中不同的顶点属性放在不同的buffer中储存。提升hit rate。
 
@@ -253,4 +255,3 @@
       对于颜色部分（光源）:如主光源方向，skybox等颜色等颜色相关的，则是动态计算的。实时把当前的太阳光、天光也转化为一组 SH 系数。
       最终光照=预计算的传输系数⋅实时灯光系数
   - Dynamic Diffuse Global Illumination: 通过硬件加速计算传输系数。
-- 

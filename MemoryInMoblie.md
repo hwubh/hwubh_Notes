@@ -35,22 +35,55 @@ TBDR
   - Shared - CPU 和GPU都可以访问，这类资源通常由CPU创建并更新。
   - Private - 存在SystemMemory上，只有GPU可以访问，通常用于绘制 render targets,Compute Shader存储中间结果或者 texture streaming.
   - Memotyless - 存在TileMemory， 只有当前Tile可以访问，用完就会被刷新掉，比如Depth/Stencil Buffer 在 iOS 上对于所有的不需要 resolve 的 rt（或 store action 设置为 don’t care）都应该设置为 memoryless，比如上面说到的Depth和Stencil。
-- Deferred：
+- Deferred： 隐面消除 (Hidden Surface Removal)
   - 1： VS后不立刻进行着色计算，而是分Tile（Binning/Tilling）
   - 2: **HSR** (Hidden Surface Removal)（仅限于**PowerVR**和**Apple Silicon**）: 光栅后，着色前，在单个像素上根据深度判断要使用哪个片元来绘制，只将最近的片元传递去着色。 如果遇到了需要AlphaTest或AlphaBlend，则停止判断逻辑，先着色计算当前片元，完成混合/Test再继续排序(如果Test没被剔除就更新深度缓冲，被剔除了就不更新)。
     > 相较于Early-Z: HSR的颗粒度是逐像素的， Early-Z是颗粒度是逐物体的，如果两个物体出现穿插就无法避免Overdraw。因为Early-Z 如果出现先绘制远的片元，再绘制近的，远的片元的深度无法把近的剔除，因此近的还是会绘制。Early-Z 虽然也是根据深度buffer来判断，但因为依赖要将片元从近到远绘制，但CPU只能逐物体排序，不能逐片元，因此Early-Z的颗粒度是逐物体的。 二者同样都会被Alpha Test打断。
     > HSR的缺点，因为判断片元依赖于所有片元的深度信息，需要等tile上所有的片元都完成了光栅化才能进行处理。
     > Early-Z 和 HSR冲突吗： 本身Early-Z 与HSR不冲突，Early-Z只是用当前的Depth buffer进行比较。可以先Early-Z 再 HSR。 但如果在Eearly-Z之前已经进行了Z-Prepass绘制好了depth buffer，此时Early-Z比较的depth buffer就是已经是最优情况下了的。 （个人认为如果不是场景中要进行Alpha Test的像素很多的话，不太需要用Z-Prepass）
   - **FPK**（Forward Pixel Kill）（**Mali** GPU）： 光栅后，着色前，通过了Early-Z的片元先进一个FIFO队列，如果有相同位置的片元进入队列，则抛弃前一个片元（因为后进入FIFO的，是刚经过EZ test 并且通过的）。
-    > FIFO队列的深度是有限的，如果一个Tile中的片元较多的话，可能出现队列满了，不得不把最前的出队进行渲染的问题。
+    > FIFO队列的深度是有限的，如果一个Tile中的片元较多的话，可能出现队列满了，不得不把最前的出队进行渲染的问题。 
     - 四代以前：Mali GPU的顶点着色也是分两次的，第一次只计算位置相关的，用于分块操作。 第二次在Binning pass阶段会计算所有非位置的顶点属性（如纹理坐标、法线、颜色等）。 最后将这些 VS Output 写入系统内存。
     - 第五代加个开始引入了延迟顶点着色（Deferred Vertex Shading, **DVS**）: Binnings pass中只处理位置相关的顶点着色，然后将分块的图元列表写入系统内存，但不写入VS Output。 Rendering pass 阶段，Tile读取对应的图元列表和原始顶点数据，重新执行 Varying Shading，将计算出的顶点属性直接存储在片上高速缓存中。![20260320104702](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260320104702.png)
-  - **LRZ pass**（Low Resolution Z pass pass）（**高通** Adreno）： 在分块阶段（binning pass），会构建一个低分辨率深度缓冲区（Z-buffer），该缓冲区可对 “LRZ 分块（LRZ-tile）” 范围内的渲染贡献进行剔除，从而提升分块阶段的性能。随后在渲染阶段（rendering pass），会先利用这个低分辨率深度缓冲区高效剔除像素，再与全分辨率深度缓冲区进行深度测试。片元着色器直接从片上缓存读取顶点属性进行插值，无需从系统内存读取。
-    - 关于VS中LRZ的影响, VS阶段只读取顶点的位置数据进行着色,用于深度(可见性)测试? 完成测试后, 将可见片元分配到相应的图块列表. 每个图块包含哪些图元的索引信息和每个图元的可见性. 后续还需在FS阶段对可见片元正式进行完整的顶点着色计算。 虽然 VS 执行了两次，但宁愿多算一次顶点（计算成本相对较低），也要避免将 VS Output 写入系统内存再读回来（带宽成本极高）。
+  - **LRZ pass**（Low Resolution Z pass pass）（**高通** Adreno）： 在分块阶段（binning pass），会构建一个低分辨率深度缓冲区（Z-buffer），该缓冲区可对 “LRZ 分块（LRZ-tile）” 范围内的渲染贡献进行剔除，从而提升分块阶段的性能。随后在渲染阶段（rendering pass），会先利用这个低分辨率深度缓冲区高效剔除像素，再与全分辨率深度缓冲区进行深度测试。片元着色器直接从片上缓存读取顶点属性进行插值，无需从系统内存读取。![20260327153616](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260327153616.png)
+    - 关于VS中LRZ的影响, VS阶段只读取顶点的位置数据进行着色,用于深度(可见性)测试（将三角形的最小深度与LRZ图进行判断）? 完成测试后, 将可见三角形分配到相应的图块列表（Visibility table）. 每个图块包含哪些图元的索引信息和每个图元的可见性. 后续还需在FS阶段对可见片元正式进行完整的顶点着色计算。 虽然 VS 执行了两次，但宁愿多算一次顶点（计算成本相对较低），也要避免将 VS Output 写入系统内存再读回来（带宽成本极高）。 https://blogs.igalia.com/siglesias/2021/04/19/low-resolution-z-buffer-support-on-turnip/
     > 相较于HSR, FPK, LRZ还多了在Binning阶段的优化，LRZ构建的低分辨率depth buffer（LRZ buffer）在Binning阶段和Rendering阶段的着色前都会进行根据LRZ buffer进行深度测试。
     > 要求着色时不写深度，不含Discrad 操作。
+    > 切换深度写入的方向，手动写入深度，混合或逻辑操作，向SSBO，Image写入数据，和Discard都会使LRZ 失效或暂时失效。 https://blogs.igalia.com/dpiliaiev/adreno-lrz/
   > UAV/SSBO的写入也会导致HSR,FPK, LRZ操作失效？因为UAV / SSBO不一定在Tile上，而且无法保证需要被剔除片元的着色数据是否需要写回。 但是可以强制开启Early-Z？ https://www.zhihu.com/search?type=content&q=LRZ%20pass
 - **Flex Render**（**高通** Adreno）：智能的在某些时候将渲染流程由TBR切换为IMR. （比如render target足够小时？） 可以省下Binning的操作. 
+- VS Output：
+  - Adreno 架构下，Binning Pass 之后只产出两种数据并会将其写到 system memory：Primitive List 和 Primitive Visibility。在 Rendering Pass 会重新执行一遍 VS，产出 VS Output。这些数据不回写回 system memory，而是存在 On-Chip Memory (LocalBuffer)，PS 阶段直接可以从 Local Buffer 读取。
+  - Mali：
+    - 四代以前：Mali GPU的顶点着色也是分两次的，第一次只计算位置相关的，用于分块操作。 第二次在Binning pass阶段会计算所有非位置的顶点属性（如纹理坐标、法线、颜色等）。 最后将这些 VS Output 写入系统内存。
+    - 第五代加个开始引入了延迟顶点着色（Deferred Vertex Shading, **DVS**）: Binnings pass中只处理位置相关的顶点着色，然后将分块的图元列表写入系统内存，但不写入VS Output。 Rendering pass 阶段，Tile读取对应的图元列表和原始顶点数据，重新执行 Varying Shading，将计算出的顶点属性直接存储在片上高速缓存中。![20260320104702](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260320104702.png)
+  - Unity: 在VertexData中将数据分为两份Stream，一份只有Position通道数据。一份为剩下的。 如果是SkinnedMesh，前一份数据还需要Normal 和 tangent？
+  - MSAA: TBR 架构中，跨 tile 的三角形在每个 tile 中都会被执行。如果开启了 MSAA，那么 tile size 就会变小，那么跨 tile 的三角形数量就会变多，vs 压力会变得更大。
+- Shader Divergency:
+  - Branching:
+    - 常量条件：这种在编译时就会被优化掉，是不会产生分支的。
+    - Uniform 作为条件：如果同个 wave 中的所有 fiber 都是走同一个条件分支，理应也是不会产生分支的。
+    - 运行时的变量决定: 需要分别跑不同的分支。 跑分支1时，分支2的fiber会处于闲置的状态。
+  - Quad Overdraw: SP（streaming processors） 在PS进行着色计算时，是以Quad (2\*2的像素块)为单位的。![20260327160556](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260327160556.png)。 如果在一个Quad中当前三角形不能占据全部的像素，就会出现Quad Overdraw。 这部分没被三角形覆盖的像素一般叫做辅助通道（Helper Lanes / Helper Pixels）， 虽然不会写入color buffer，但还是会进行着色计算。
+    - Adreno上一个Wave（Wavefront/Warp）上虽然有128个fiber（Thread/Lane），但因为一个Wave上最多加载四个三角形对应的像素，最极端的情况下，四个三角形只对应四个有效像素，那么128个FIber就只画4个像素，闲置了124个。
+  - Z-test Divergency： 片元经过着色计算后没有通过深度测试，未写入Color buffer。
+  > 检测Divergency 的方法： Divergency 比例 = % Time ALUs Working - % Shader ALU Capacity Utilized;
+      % Time ALUs Working： 当着色器忙碌时，ALU 工作的时间百分比。
+      % Shader ALU Capacity Utilized： 在 ALU 工作的那些周期里， 有效工作的比例。
+      其中前者统计的是被Wrap分配走的Fiber，而后者只考虑有有效产出的Fiber。 如果出现前者高，后者低，说明出现了Divergency，Wrap中很多Fiber在闲置或做无用功。
+- Shader Complexity:
+  - instruction count: 
+    - 静态指令数（static instruction count）: 编译后的 shader 程序里的指令数量；
+    - 动态指令数（dynamic instruction count）: 被执行的指令数量。（如循环产生的指令）
+    > Mali Offline Compiler统计的是静态指令数。 
+    > 统计指令过多的指标： % Instruction Cache Miss （印象里Branching也会导致指令变多？）
+  - Register： 
+    - 延迟隐藏 (Latency Hiding): 当前一个shader任务（Wave）在等待数据时，SP可以通过**上下文切换（Context Switch）**立即转去执行另一个 Shader任务（Wave） 的计算任务。 但如果Register的数量不够同时容纳两个的Shader的上下文，会导致切换失败。SP只能等待。
+    - 寄存器溢出（Register Spilling）: 当占用寄存器数量继续增大，大于 on-chip memory 的尺寸时, 只能把上下文数据存入System Memory。
+    > 检测Register的方法： 
+        Mali Offline Compiler中register footprint per shader instance 来看 shader 寄存器的使用数量。
+        在 Snapdragon Profiler 中可以通过 % Shaders Stalled 来判断 shader 的执行效率。当 SP 无法切换到其他 shader 去执行时，就会出现 stall.
+        查看IPC（instruction per cycle）是否过低。
 
 - 参考资料:
   https://zhuanlan.zhihu.com/p/407976368
@@ -62,3 +95,4 @@ TBDR
   https://zhuanlan.zhihu.com/p/1928114739189375482
   https://www.zhihu.com/question/427803115
   https://zhuanlan.zhihu.com/p/1923685725662081189
+  https://zhuanlan.zhihu.com/p/2759747438
