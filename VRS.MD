@@ -56,6 +56,13 @@ Primitive attribute
 
 ----------------------
 
+在FS中使用R8_UNIT 作为RWTexture的问题：没法8位8位的写入。 使用Uint读取时，会读取00~30四个像素。而Texture[0,0]其实代表了[00]到[30]，Texture[1，0]则是从[4,0]开始的。
+
+--------------------------
+
+
+--------------------------
+
 Image-based VRS (Tier 2 VRS):
 > Tier 2 VRS 还包含 Per Primitive （attribute）的。
 - Shading Rate Image (**SRI**) 图的生成: 
@@ -70,6 +77,7 @@ Image-based VRS (Tier 2 VRS):
     - 对于使用Compute Shader进行计算的pass，因为无法依赖硬件进行Shading Rate的读取。需要将整张SRI图读取进来，根据读取道德Shading Rate来决定哪些Thread直接return。用剩下的Thread扩大采样范围，填补被杀掉的线程留下的空袭。
     - 对于Denoiser pass： VRS会导致噪点增多，Denoiser需要读取SRI图, 根据当前区域的Shading Rate来调整模糊的权重。Shading Rate越大，权重值越大，用更强的平滑度来弥补欠采样的问题。
     - 如果开启了DRS导致SRI图与color attachment的tile数量不符，需要通过Down/up scale SRI图进行匹配。
+    ![20260330114858](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260330114858.png) 
   > 对于高分辨的画面，Tier 2 VRS的性能改善会比较明显。 
   - Call of Duty: Software VRS:![20260326102337](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260326102337.png)
     - 申请一张4x MSAA图: 通过坐标系的重映射来将4x采样点对应到四个像素上。 
