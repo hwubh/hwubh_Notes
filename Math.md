@@ -147,3 +147,13 @@
   ```
   - 计算AABB与面的最近距离时，可以通过Dot(extent, Abs(normal))来得到extent在normal的最长投影。原理可以考虑到extent与abs(normal)在各个分量均为整数，其计算结果可以视为extent各个分量的normal上的投影取abs()后的和。
 - 14: 蒙特卡洛积分，重要性采样和GGX： https://zhuanlan.zhihu.com/p/1959722671534223757 https://zhuanlan.zhihu.com/p/361227286 https://zhuanlan.zhihu.com/p/338103692 https://zhuanlan.zhihu.com/p/695130713 https://zhuanlan.zhihu.com/p/41217212  https://zhuanlan.zhihu.com/p/360420413  https://developer.nvidia.com/gpugems/gpugems3/part-iii-rendering/chapter-20-gpu-based-importance-sampling https://www.cnblogs.com/minggoddess/p/14645677.html https://www.cnblogs.com/dydx/p/8635923.html https://patapom.com/blog/BRDF/PreIntegration/#stating-the-problems https://zhuanlan.zhihu.com/p/104422026 https://agraphicsguynotes.com/posts/sample_microfacet_brdf/ https://www.zhihu.com/question/546947425
+
+- 15: 屏占比算法 https://zhuanlan.zhihu.com/p/657320510
+  - AABB:
+    - 算Centre 和 Extends的方法： 分别算三个面的面积，然后根据角度和Z方向平方，等比缩小为到屏幕上的面积。 -》 存在误差，没考虑FOV和分辨率？ -》 得到的结果是个权重值，而不是实际的像素数量。
+    - 算顶点： 将顶点投影到屏幕空间，然后在XY方向上找到Rect进行包裹。然后根据屏幕边界进行Clamp。
+  - Sphere:
+    - 将AABB简化为球体，然后计算这个球体在投影平面上的“表现直径”。 将圆的半径经过FOV进行比例缩放，返回根据圆心的深度进行缩放。 因为切点和使用的distance是圆心的缘故，会比实际的的包围球到屏幕空间的投影小一些。
+  - Unity，相对高度：
+    - 计算物体包围球/AABB盒的半长在垂直方向上的占据屏幕的比例（算法参考根据深度缩放），然后根据FOV对应到水平方向。
+  > 根据深度缩放的思路是：以视锥体，物体中心，垂直/水平方向的长度构建直角三角形。然后根据相似三角形进行缩放。 

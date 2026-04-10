@@ -40,8 +40,17 @@
     - 数组 + 单项链表
     - ![20240605130119](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240605130119.png)
   - Hashtable
+    - 存储 bucket 结构的数组。每个 bucket 包含 Key、Value 和哈希值（hash_coll）。开放寻址法 (Open Addressing) 中的 双重哈希 （Double Hashing）
     - Key，Value皆为Object
   - 循环数组：指向队尾的指针可以动过（mod 数组的长度来回到初始位置），同时用(tail+1)%array.length=head 来判断空间是否队满（牺牲了一个元素的位置）。https://cloud.tencent.com/developer/article/1013597
+  - SortedDictionary: 
+    - 内存使用	较大 (每个节点都有对象开销)
+    - 查找、插入、删除的时间复杂度均为 O(logn)
+    - 底层实现： 红黑树 (Red-Black Tree)
+  - SortedList：
+    - 支持随机访问，内存使用较小。
+    - 增删O(n)， 查找O(logn)
+    - 两个动态数组
 - Class vs Struct：
   - ![20240508212409](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240508212409.png)
   - ![20240508212423](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240508212423.png)

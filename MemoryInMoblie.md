@@ -5,13 +5,27 @@ GPU Architecture：
 - Apple Silicon和现代的骁龙（Snapdragon）和天玑（Dimensity）芯片也还存在可供CPU, GPU, NPU访问的**SLC (System Level Cache)**介于 L2 cache和System memory之间。
   > Apple 叫 **GPU Last Level Cache**
 - Binding Mode: OpenGL 和早期DX上限制了Shader可以访问的贴图数量(对应有几个槽位Slot). CPU 在渲染前，必须显示调用指令"BindTexture(MyTexture, Slot 0)". Shader中写死：layout(binding = 0) sampler2D myTex;。 Slot不够时可以使用VT方案或Texture Atlas, TextureArray来节省Slot.
+  - Bnindless(Unbounded)： 将 Buffer\Texture 的 GPU 虚拟地址存储在 Bindless Buffer 中，在 Shader 中通过索引 Bindless 而直接访问 Texture\Buffer 数据的技术。
+  - Pros：
+    - 减少Drawcall（切纹理造成的， 但不能减少SRP Batcher开启时的SetShaderPass）
+    - 不收Slot数量影响
+    - 不需要再频繁地管理 PropertyBlock 或切换 Descriptor Set。材质数据可以精简为一个结构体，里面存着几个 uint 索引，内存布局非常紧凑。（？） -》减少了绑定资源的消耗？
+  - Cons： 会占用Register存储Resource Descriptor。
+  - 假 Bindless： 通过Texture Array来避免Slot数量闲置。对Array中的纹理有限制（相同维度、相同大小、相同格式） -》 更新Slice中的数据时需要更新整个内容数据。Bindless只需要更新指向的句柄（Descriptor）。
+  - 有限 Bindless：  D3D12 和 Vulkan 中， 可以使用Descriptor 数组（Array of Descriptor， **AoD**）。 每个element对应一个单独的资源。
+    - 有限： 需要在Shader中指名AOD的大小，无法动态调整。
+  - 真Bindless: shader中定义AOD时不指定大小。
+  - Procedure: 
+    - CPU侧更新： 更新描述符来实现动态绑定不同的资源
+    - GPU侧绑定： 根据索引去找查找对应的VRAM地址
 
 TBDR
 - Procedure: 分为 Tile Phase 和 Render Phase两个阶段
   - Tile Phase: 
     - 将当前ViewPort划分为多个Tile，
     - 执行VertexShader，三角形都变换到屏幕空间 
-    - 计算Primitive会影响到哪些Tile，并将结果存储到主存上去(储存到Tiled Vertex Buffer中，alias Intermediate store， Frame Data， parameter buffer， Geometry Work Set)。
+    - 计算Primitive会影响到哪些Tile，并将结果存储到主存上去(储存到Tiled Vertex Buffer中，alias Intermediate store， Frame Data， parameter buffer， Geometry Work Set)。 
+    > PowerVR中, parameter buffer中好像分两块， Primitive List（Tile List / Display List） 和 Vertex Data。 Primitive List 只存Index，不存实际的Position，以节省带宽，需要后续FS中再算。
   - Render Phase:
     - Load Action: 初始化Tile memory，决定是否从VRAM加载Frame Buffer数据到Tile Memory上。 
       - Load： 从VRAM加载 frame buffer的数据。 适用于只绘制部分像素时。
@@ -30,6 +44,7 @@ TBDR
         > 就两种操作，需要指定一张“普通的、非 MSAA 的纹理”来接收Resolve后的结果。
         > IOS上好像针对MSAA, Depth, Stencil有优化? 设置为MTLStorageMode.Memoryless时,不存在未经过Resolve的MSAA图. 采样点在Tile中确定, resolve后写回非MSAA图到VRAM. Depth/Stencil也可只存在于tile上?
       > - **transaction elimination** （ARM）: 比较该Tile前一次和本次的渲染结果的 **循环冗余校验（CRC值）**, 判断Tile是否发生变化。如果相同，则认为二者没变化，不执行Stroe操作，将framebuffer写回VRAM。
+      
 ![20260319155219](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260319155219.png)
 - Resource Storage Mode： 内存中的对象的被CPU和GPU的访问模式，通常有Shared，Private，Memoryless三种
   - Shared - CPU 和GPU都可以访问，这类资源通常由CPU创建并更新。
