@@ -37,6 +37,10 @@ MaliGPU
 > mt8626 -> Mali-G615 MC6
 OpenGLES 上不支持。
 
+
+- Vulkan: 需要扩展 "VK_KHR_fragment_shading_rate" -> 需要调用vkCreateRenderPass2 才能在pNext 中挂载VkFragmentShadingRateAttachmentInfoKHR结构体。
+- OpenGLES: 需要扩展“GL_EXT_fragment_shading_rate_attachment”. 在云真机平台上测试得，该扩展从Adreno 740，即骁龙8Gen2上开始出现？
+
 PowerVR GPUs 不支持
 
     jumping the VRS bandw
@@ -60,8 +64,100 @@ Primitive attribute
 
 --------------------------
 
+vulkan support vrs attachment:
+- create VKImage with flag VK_IMAGE_USAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR：RenderTexture：：Create（） -> device.CreateRenderColorSurface -> VK CreateColorRenderSurfacePlatform -> VK CreateColorSurfaceImpl, CHECK FLAG(RenderTexture的serialized 属性，要修改transfer版本) VK_IMAGE_USAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR
+
+UpdateShadingRate -》 CreateRenderPass2 -》 CreateRenderPass -》 GetPackedRenderPass -》SetRenderPassSetup（ GetRenderPass？）， 根据 MakeCompatibilityRenderPassDescription进行判断 -》 SetRenderTargetsImpl？ 
+
+MakeCompatibilityRenderPassDescription -》 
+
+m_ShadingRateAttachment -》 SetShadingRateAttachment -》 ConfigureFoveatedRendering -》 
+
+- set attachment:  Framebuffers::BeginUseFramebuffer ->MakeFramebufferSetup -> RenderSurface::UseAttachment -> Texture::UseAttachment -> Attachment::Attachment -> VkFramebuffer Framebuffers::CreateFramebuffer
+RenderSurface (Unity层)
+       ↓
+Texture / Renderbuffer
+       ↓
+Image (VkImage + VkImageView)
+       ↓
+Attachment
+       ↓
+FramebufferSetup
+       ↓
+VkFramebuffer
+
+m_IsConfigureFragmentShadingRateImageEvent 的作用？
+
+Vk中设置VRS SRI 图要注意两点，一个是要确保SRI图被附加到了**Fragment Shading Rate Map**（RenderDoc的FB阶段可见）上，一个是确保**Shading Rate Combiners**（Renderdoc的Rasterizer阶段可见）上不是KEEP（会导致被忽略）
+![20260403153550](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260403153550.png)
+
+VulkanCapsViewer ： 可用于查看Vulkan扩展
 
 --------------------------
+DX12 上可以使用PIX来查看 Shading Rate情况，不过需要使用DXIL(HLSLPROGRAM 中添加 *#pragma use_dxc* 来强制使用)
+
+DX12: 打包后kRenderCommand_DrawRendererList 指令在 kRenderCommand_SetShadingRateImageEnable 之后 -》 怀疑是context.DrawRenderers 不遵从commandbuffer的队列。 -》 实际上DrawRenderers有自己的一个队列，与context.ExecuteCommandBuffer的队列进行区分。 Unity在上层有抽象了一个m_Commands来进行管理。（比如每次context.ExecuteCommandBuffer或 context.DrawRenderers都会往m_Commands队列中添加个对象。）
+
+放在Before里设置Image 好吗？
+--------------------------
+OpenGLES上： 
+
+
+--------------------------
+FrameDebugger： 加一个CombinerOp显示？
+
+--------------------------
+VRS 的设置：
+- DX11:  依赖NVAPI
+  - 使用CreateShadingRateResourceView将传入的SRI图包装为 ID3D11NvShadingRateResourceView（向GPU声明该贴图用于决定Shading Rate）
+  > Resource View： Resource View（资源视图） 是一种轻量的包装对象，它的作用是告诉 GPU 这块内存数据应该被当成什么、怎么去访问。
+  - 创建 _NV_D3D11_VIEWPORT_SHADING_RATE_DESC_V1 实例，其包含一个bool成员enableVariablePixelShadingRate 表示是否开启VRS。 一个数组成员 shadingRateTable 作为GPU读取SRI取值时映射表（不同于其他API，NVAPI的映射表是由用户决定的，而且NVAPI提供的选项有很多，甚至可以Discard，超采样 tile）
+  - 创建 NV_D3D11_VIEWPORTS_SHADING_RATE_DESC 实例，其包含一个_NV_D3D11_VIEWPORT_SHADING_RATE_DESC_V1实例，当前的版本version，和绑定的视口，裁剪矩阵数量（DX11理论最多16个？）
+  - 使用NvAPI_D3D11_RSSetViewportsPixelShadingRates将 NV_D3D11_VIEWPORTS_SHADING_RATE_DESC （主要时映射表） 绑定在设备上下文上。
+  - 使用RSSetShadingRateResourceView 将 ID3D11NvShadingRateResourceView （SRI图） 绑定在设备上下文。
+  > TileSize 是硬件/驱动写死的，从 NV_VARIABLE_PIXEL_SHADING_TILE_WIDTH  NV_VARIABLE_PIXEL_SHADING_TILE_HEIGHT 获取（写死了16）
+
+- DX12: 
+  - RSSetShadingRate: 设置Pipeline shading rate 和 combinerOps
+  - 使用D3D12_RESOURCE_BARRIER將SRI的资源状态设置为D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE
+  > TileSize 是硬件/驱动写死的，从 D3D12_FEATURE_DATA_D3D12_OPTIONS6 获取
+  - 使用RSSetShadingRateImage将SRI绑定到图形命令列表的特定槽位。
+
+OpenGLES: 要求扩展 
+  - 通过glFramebufferShadingRateEXT (GLenum target, GLenum attachment, GLuint texture, GLint baseLayer, GLsizei numLayers, GLsizei texelWidth, GLsizei texelHeight) 将 SRI图，TileSize绑定到具体的FBO上。 baseLayer：使用“texture” （SRI）的第几层开始；numLayers：使用“texture” 几层作为SRI进行绑定。 比如如果时VR的话，因为存在两个视图，就可以绑定两层（数量受GL_MAX_FRAGMENT_SHADING_RATE_ATTACHMENT_LAYERS_EXT控制）。 target为绑定目标”（Binding Target）枚举： 多为 GL_FRAMEBUFFER 或 GL_DRAW_FRAMEBUFFER。
+  >  glBindFramebuffer 可以把 FBO对象绑定到绑定目标”（Binding Target）枚举上。
+  - 通过glShadingRateCombinerOpsEXT设置当前CombinerOps
+
+Vulkan: Vulkan 1.2以上
+  - 通过vkCmdSetFragmentShadingRateKHR 设置Pipeline shading rate 和 combinerOps
+  - 创建VkFragmentShadingRateAttachmentInfoKHR(sType 为VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR)，其成员包含 SRI图， TileSize和一个用于未来扩展的pNext指针。
+  - 在vkCreateRenderPass2 renderpass的subpass 的pNext 上挂载VkFragmentShadingRateAttachmentInfoKHR结构体。
+  > Vulkan 1.4后不需要绑定在RenderPass：：subpass，直接挂载在 VkRenderingInfo::pNext 上？
+
+--------------------------
+
+- 上一帧得到的亮度图在传入前要做什么处理？： 目前上一帧传入的亮度图会通过Motion Vector进行重投影。但这依赖于绘制一个Depth-prepass。这其实消耗是比较大的。
+  - Gears Tactics的优化方式：异步计算-> 同时进行上一帧的SRI图生成和当前帧的Depth-prepass
+  - AMD FidelityFX： 会生成Motion Vector，但是同时会将Motion Vector上移动快的像素组降低shading rate。
+  ![20260403164213](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260403164213.png) 
+
+- 如何集合在Tonemapping中（FS）中： 目前的问题的在于，RWTexture只能以UInt/Int的形式，32位的进行读写。放在以R8_UInt的SRI图上时，相当于每次都会读写四个像素。而且RWTexture[0，0]相当于[0，0]~[3，0]. 目前想到的方法是每个像素读写时都会后后续四个Tile上相同位置的像素同时进行计算，结果分别写入32位的4个8位上。但这样相当于计算量乘以4了。
+  - 替代方案： 使用compute shader 计算。
+  - Unity6： 单独有个pass来画。
+-----------------------------
+Windows 编Renderdoc 的坑：
+- 编译android： https://qiankanglai.me/2020/12/26/renderdoc-compile-android-on-windows/index.html 
+  - include-bin缺失： 要先用g++ -O2 -o renderdoc/3rdparty/include-bin/include-bin.exe renderdoc/3rdparty/include-bin/main.cpp 编译出include-bin.exe， 然后将include-bin.exe复制到 build-android/bin/的Bin目录下, 命名为include-bin
+  - git version不匹配 --> 过不了版本检测。
+  - 64位，32位都得编译，不然过不了版本检测。 -》 32位的放在: build-android-arm32; 64位的放在： build-android
+
+--------------------------
+
+Metal rasterization rate map (RRM): 更类似density map的思路。 目前metal RRM是从X/Y两个方向分别记录Tile的缩放比例，每个取值代表一整行/列的Tile在X/Y方向的目标缩放值。 因此这里需要将SRI图做个保守转换？
+------------------------------------
+
+关于Rendering Debugger中的显示。
+-----------------
 
 Image-based VRS (Tier 2 VRS):
 > Tier 2 VRS 还包含 Per Primitive （attribute）的。

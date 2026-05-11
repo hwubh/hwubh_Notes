@@ -99,6 +99,43 @@ TBDR
         Mali Offline Compiler中register footprint per shader instance 来看 shader 寄存器的使用数量。
         在 Snapdragon Profiler 中可以通过 % Shaders Stalled 来判断 shader 的执行效率。当 SP 无法切换到其他 shader 去执行时，就会出现 stall.
         查看IPC（instruction per cycle）是否过低。
+    - 如何优化寄存器:
+      - 优化指令，减少临时寄存器的使用： MAD
+      - 控制变量的作用域: 要用才定义，使用逻辑分段。
+      - 向量的拆分与重组： 将变量尽量合到一个向量中。 多用向量运算。
+      - 多用内置函数。
+      - 减少分支； 慎用unroll
+      - 使用half代替float
+      - 延迟采样，不用一口气采样所有贴图。
+      - 只用一次的量可以当作Uniform，避免占用通用寄存器。
+  - Wave优化：
+    - 消除 Wave 发散 (Divergence) -> 
+      - Branching
+      - Overdraw
+    - 提升 Occupancy（占用率）: GPU 能够同时并发运行的 Wave 数量
+      - 减少寄存器使用
+      - 优化Group Size
+      - 优化Shared memory
+    - Wave Intrinsics： 允许 Wave 内部的线程直接交换数据，而无需经过内存或 Shared Memory，这极大地降低了延迟和寄存器压力。 -> 避免造成读写冲突的原子操作？
+    - 避免全局同步和等待：
+      - 渲染状态同步
+      - Texture Bounds
+      - Instruction Bounds
+      - Register Bounds
+
+- MAD / FMA 指令:
+  - 可以在一个clock cycle完成以下计算：res=a×b+c
+  - 优点：
+    - 优化指令数： MUL + ADD -> MAD
+    - 减少寄存器占用： 减少了使用临时寄存器记录加法结果的结果。
+  - 操作： 
+    - 显式改写代数式
+    - 善用单分量缩放与偏移 (Scale & Bias)
+    - 避免过度使用括号， 常量合并。
+
+
+- RT Compression: 
+  - UBWC: 
 
 - 参考资料:
   https://zhuanlan.zhihu.com/p/407976368
