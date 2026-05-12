@@ -69,6 +69,10 @@
 
 <center>（这幅图可以看作时开放世界中相机正在远离，或者SLG俯视角时相机正在上升）</center>
 
+拾遗: 
+![20260512165138](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260512165138.png)
+- 虚拟贴图被分割成了大小相等的Page。虚拟贴图和索引贴图都是按照mipmap组织的，物理缓存没有mipmap层级，它会在不同的page中存储不同级别的mipmap贴图。
+
 ###工程实践的补充：
 ####Texture Filtering：
 -  由于虚拟纹理并没有完整加载，所以各种采样过滤在page的边界会有问题

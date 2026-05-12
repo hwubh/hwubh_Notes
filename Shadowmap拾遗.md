@@ -14,7 +14,11 @@
   - Sliding Window： 复用上一帧已渲染的，只更新当前新的阴影内容 New Page。
   - Wraparound / Toroidal Addressing： 记录相机矩阵的偏移量。将New Page记录到不需要的Page上，因为采样时New Page的坐标相较于原点来说是大于阴影贴图的覆盖的，可以取余（mod）阴影贴图的尺寸来得到正常的坐标。 -> 由于阴影贴图上是空间不连续的，没法使用硬件插值。![20260417164342](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260417164342.png)
     - 独立级联：对于不同精度要求可以通过划分不同的级联来改善。 不同的级联使用各自的Pagemap，其大小相同，对应到各自的Physical Texture上（或Texture Atlas上相同大小的块）。
+    - Pagemap Mipmap: 
+      - ![20260512165138](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260512165138.png)
+      - 虚拟贴图被分割成了大小相等的Page。虚拟贴图和索引贴图都是按照mipmap组织的。物理缓存没有mipmap层级，它会在不同的page中存储不同级别的mipmap贴图。
     - HPT(Hierarchical Page Table)： 
+      - 独立级联和Page Mipmap都有一个问题，如果VT要表示的范围很大，Mip0的Pagemap的尺寸会过大。
       - 思路类似四叉树： 父Page被四个低层级的子Page指着。不同层级的Page使用的Slot大小是一致的。
       - Pagemap上像素存的信息：
         - 物理页地址（Physical Page Address） -> PageOffset，记录的对应physical texture上Slot的索引。
@@ -46,3 +50,6 @@
 - 添加细节： 顶点偏移，高度图，贴图
 - 噪声，抖动，多线性插值
 - ID tex也做成VT.
+
+悬崖（XY方向的投影地形）: 
+- FryCry5： tri plane projection，如有必要的话做blend来处理。 使用随机混合来降低使用不同tiling系数的sample次数。"stochastic cliff shading": 使用有噪点的alpha test来替代alpha blend，本质上是一个screen door effect

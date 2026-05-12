@@ -4,6 +4,18 @@ GPU Architecture：
 - 各个GPU Core之间还有共享的L2 cache。
 - Apple Silicon和现代的骁龙（Snapdragon）和天玑（Dimensity）芯片也还存在可供CPU, GPU, NPU访问的**SLC (System Level Cache)**介于 L2 cache和System memory之间。
   > Apple 叫 **GPU Last Level Cache**
+
+- Batching（合批）: 合批可以从三个角度进行考虑，1：减少管线状态切换； 2：资源绑定； 3：渲染指令的调用。 一次Drawcall含有以下操作: 
+    设置/切换 PSO（Shader程序；混合、深度等渲染状态； 顶点布局描述）;
+    绑定 Shader 资源（常量缓冲区、纹理、采样器）
+    更新各类常量（世界矩阵、材质参数等）
+    绑定 顶点(Vertex)缓冲， 索引（Index）缓冲（定义哪些顶点形成三角形）
+  - 管线状态切换： 设置/切换 PSO
+  - 资源绑定: 绑定 Shader 资源（常量缓冲区、纹理、采样器） + 更新各类常量（世界矩阵、材质参数等） + 绑定 顶点(Vertex)缓冲， 索引（Index）缓冲（定义哪些顶点形成三角形）
+  - 渲染指令的调用: drawcall减少，比如DrawInstance 合并了Input Assembly阶段中 VertexBuffer 和 IndexBuffer 的绑定，以及将多次DrawIndexed绘制指令合并成一条DrawIndexedInstanced。
+  - SRP Batching: 针对前两点 -> 合并了PSO的设置以及材质对应的PerMaterialBuffer的绑定；
+  - Static/Dynamic Batching: 通过合并相同材质的Mesh以减少Drawcall。
+  - Bindless: 优化资源绑定开销和绘制指令调用开销. 允许绑定固定/不定长度的描述符到GPU，将绑定纹理的步骤从CPU转移到了GPU。 因此通过PerInstance 数据里增加一个纹理 ID，指向 Bindless 堆，从而实现“一个 DrawCall 画不同纹理的物体”。 
 - Binding Mode: OpenGL 和早期DX上限制了Shader可以访问的贴图数量(对应有几个槽位Slot). CPU 在渲染前，必须显示调用指令"BindTexture(MyTexture, Slot 0)". Shader中写死：layout(binding = 0) sampler2D myTex;。 Slot不够时可以使用VT方案或Texture Atlas, TextureArray来节省Slot.
   - Bnindless(Unbounded)： 将 Buffer\Texture 的 GPU 虚拟地址存储在 Bindless Buffer 中，在 Shader 中通过索引 Bindless 而直接访问 Texture\Buffer 数据的技术。
   - Pros：
@@ -18,6 +30,7 @@ GPU Architecture：
   - Procedure: 
     - CPU侧更新： 更新描述符来实现动态绑定不同的资源
     - GPU侧绑定： 根据索引去找查找对应的VRAM地址
+  > 描述符集布局（Descriptor Set Layout） 是一个模板，它预先定义了一个描述符集由哪些资源绑定点组成，每个绑定点是什么类型、能被哪个着色器阶段访问.  其可以由若干个VkDescriptorSetLayoutBinding 组成，其中如果VkDescriptorSetLayoutBinding 的descriptorCount 大于一，则说明其绑定的描述符数量不止一个，如果绑定的shader，则可以视为一个AoD。
 
 TBDR
 - Procedure: 分为 Tile Phase 和 Render Phase两个阶段
