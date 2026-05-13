@@ -6,7 +6,7 @@ GPU Architecture：
   > Apple 叫 **GPU Last Level Cache**
 
 - Batching（合批）: 合批可以从三个角度进行考虑，1：减少管线状态切换； 2：资源绑定； 3：渲染指令的调用。 一次Drawcall含有以下操作: 
-    设置/切换 PSO（Shader程序；混合、深度等渲染状态； 顶点布局描述）;
+    设置/切换 PSO（管线状态对象）（Shader程序；混合、深度等渲染状态； 顶点布局描述）;
     绑定 Shader 资源（常量缓冲区、纹理、采样器）
     更新各类常量（世界矩阵、材质参数等）
     绑定 顶点(Vertex)缓冲， 索引（Index）缓冲（定义哪些顶点形成三角形）
@@ -16,6 +16,7 @@ GPU Architecture：
   - SRP Batching: 针对前两点 -> 合并了PSO的设置以及材质对应的PerMaterialBuffer的绑定；
   - Static/Dynamic Batching: 通过合并相同材质的Mesh以减少Drawcall。
   - Bindless: 优化资源绑定开销和绘制指令调用开销. 允许绑定固定/不定长度的描述符到GPU，将绑定纹理的步骤从CPU转移到了GPU。 因此通过PerInstance 数据里增加一个纹理 ID，指向 Bindless 堆，从而实现“一个 DrawCall 画不同纹理的物体”。 
+  - PSO缓存？
 - Binding Mode: OpenGL 和早期DX上限制了Shader可以访问的贴图数量(对应有几个槽位Slot). CPU 在渲染前，必须显示调用指令"BindTexture(MyTexture, Slot 0)". Shader中写死：layout(binding = 0) sampler2D myTex;。 Slot不够时可以使用VT方案或Texture Atlas, TextureArray来节省Slot.
   - Bnindless(Unbounded)： 将 Buffer\Texture 的 GPU 虚拟地址存储在 Bindless Buffer 中，在 Shader 中通过索引 Bindless 而直接访问 Texture\Buffer 数据的技术。
   - Pros：
@@ -31,6 +32,52 @@ GPU Architecture：
     - CPU侧更新： 更新描述符来实现动态绑定不同的资源
     - GPU侧绑定： 根据索引去找查找对应的VRAM地址
   > 描述符集布局（Descriptor Set Layout） 是一个模板，它预先定义了一个描述符集由哪些资源绑定点组成，每个绑定点是什么类型、能被哪个着色器阶段访问.  其可以由若干个VkDescriptorSetLayoutBinding 组成，其中如果VkDescriptorSetLayoutBinding 的descriptorCount 大于一，则说明其绑定的描述符数量不止一个，如果绑定的shader，则可以视为一个AoD。
+
+Nanite:
+- Nanite Mesh:
+  - 将Mesh切分为Cluster
+    > cluster的优势: 更新粒度的剔除，提升Cache命中率 
+    - cluster: 静态构建，使用 HLOD组织。
+  - 在Cluster上用BVH都将HLOD
+  - 压缩顶点属性，Index
+- Procedure
+  - Streaming: 从上一帧回读的 Cluster Page Request 数据异步上传 Cluster 渲染数据
+  - InitContext： 初始化
+  - CullRasterize： 执行剔除与光栅化
+    - InstanceCull
+    - PersistentCull ： 使用上一帧的HZB
+    - 硬件光栅化/软件光栅化：根据Cluster的屏幕空间大小选择不同的光栅化方式。 输出Visible Buffer
+    - 构建 HZB
+    - Post PersistentCull： 补漏，对被遮挡的 BVH Node 和 Cluster 进行剔除； 使用当前帧的BVH。
+    - Post 硬件光栅化/软件光栅化
+  - EmitDepthTargets: 生成Depth 相关的 Scene Depth、Stencil、Velocity、Material Depth 等 Buffer
+  - BasePass: G-Buffer
+  - Shadows: VSM需要的Detph
+  - Readback： 回读在 PersistentCull pass 中产生的 Cluster Page Request 数据。
+- Visible Buffer： RG32格式，R通道7bit存InstanceID，25bit存VertexID。 G通道存depth。 Material信息存在另外的 Material depth buffer中。
+  - InstanceCull: 以Mesh为单位的culling。 
+  - PersistentCull: 以cluster为单位的culling。 先通过Mesh的BVH进行层次性剔除，然后使用生产者-消费者模式剔除队列中的Node。 线程从FIFO任务队列总取Node进行剔除，通过剔除的节点的四个子节点加入到队列的末尾。 线程即作为生成，也作为消费者。 最后的叶节点如果也通过了的话，加入到Cluster List中。
+  - 光栅化:
+    - 硬件光栅化: 大三角形和非Nanite Mesh。
+      > 小三角形容易造成Quad Overdraw？
+    - 软件光栅化： 小三角形使用Compute Shader写成的软光栅化； 每个Cluster对应一个线程组， 先算出所有顶点的剪裁空间坐标存入Shared Memory中。 然后每个线程读取对应三角形的Index Buffer和变换后的Vertex Position，根据Vertex Position计算出三角形的边，执行背面剔除和小三角形（小于一个像素）剔除，然后利用原子操作完成Z-Test，并将数据写进Visibility Buffer。
+      > Nanite Mesh 不支持顶点位置会发生变化，带有Mask的Mesh
+  - EmitDepthTargets: 
+    - Nanite Mask: 计算当前像素是否是Nanite Mesh
+    - Scene Depth Buffer: 根据Nanite Mask将Visible buffer 写入场景的 depth buffer中
+    - Stencil Buffer： Nanite MESH是否接受贴花？
+    - Emit Material Depth: 本质是Material ID Buffer， 但不是UINT整数型贴图，而是使用D32S8的深度图格式。 为了方便后续使用Z Test Equal来筛选材质， Stencil Test 来筛选Nanite Mesh。
+      - Deferred Material (Deferred Texture): 延迟渲染时，因为只能渲染一次，使用统一的Shader 程序。 一些复杂的效果只能单独渲染该Mesh或重复调用该材质的shader进行全屏渲染。  Deferred Material 将材质分类，找出每个材质对应的像素进行着色计算。
+        - Material Culling： 
+          - 将屏幕划分为8*8的Tile。 ~~统计每个Tile包含的MaterialID， 将ID的最大最小值作为Material ID Range存入一张R32G32UINT图中。~~ 记录各个材质对应的Tile 列表。 （避免出现大量空转的Wrap）
+          - 逐材质绘制其Tile列表的各个Tile，并使用 Material Depth剔除无效像素，只对有效像素进行着色。
+  - 使用Visibility Buffer记录当前像素实际使用的顶点，深度，材质数据，避免G-Buffer的带宽消耗。
+    - 维护一个全局的顶点数据和材质贴图表：着色计算时，从顶点数据中根据InstanceID和VertexID获取顶点属性。使用Barycentric Coord 插值顶点属性。 使用materialID获取材质信息。
+
+Mesh Shader: 在硬件层面实现Visible Buffer的计算？ 替代了“Input Assembler → Vertex Shader → Hull Shader → Tessellator → Domain Shader → Geometry Shader ”
+- 输入: 自定义结构，不一定是顶点缓冲； 
+- 处理: 一次处理一个小网格块（Meshlet）
+- 输出: 直接输出最终图元
 
 TBDR
 - Procedure: 分为 Tile Phase 和 Render Phase两个阶段
@@ -79,6 +126,9 @@ TBDR
     > 要求着色时不写深度，不含Discrad 操作。
     > 切换深度写入的方向，手动写入深度，混合或逻辑操作，向SSBO，Image写入数据，和Discard都会使LRZ 失效或暂时失效。 https://blogs.igalia.com/dpiliaiev/adreno-lrz/
   > UAV/SSBO的写入也会导致HSR,FPK, LRZ操作失效？因为UAV / SSBO不一定在Tile上，而且无法保证需要被剔除片元的着色数据是否需要写回。 但是可以强制开启Early-Z？ https://www.zhihu.com/search?type=content&q=LRZ%20pass
+  - Nvidia的硬件光栅化(Rasterization): 一个三角形通常会经历两个阶段的光栅化：Coarse Raster和Fine Raster
+    - Coarse Raster: 以单个三角形作为输入，分为若干个8*8像素的块。然后使用低分辨率的Z-Buffer进行遮挡剔除（Z-Cull）。
+    - Fine Raster： 进行Early-Z, 输出2*2像素的Quad。
 - **Flex Render**（**高通** Adreno）：智能的在某些时候将渲染流程由TBR切换为IMR. （比如render target足够小时？） 可以省下Binning的操作. 
 - VS Output：
   - Adreno 架构下，Binning Pass 之后只产出两种数据并会将其写到 system memory：Primitive List 和 Primitive Visibility。在 Rendering Pass 会重新执行一遍 VS，产出 VS Output。这些数据不回写回 system memory，而是存在 On-Chip Memory (LocalBuffer)，PS 阶段直接可以从 Local Buffer 读取。

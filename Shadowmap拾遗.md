@@ -45,7 +45,31 @@
     - 缺点：
       - 逻辑较为复杂，Physical Texture之间不是空间连续的，不能使用硬件双线性插值？ -》 可以各个Slot单独加个Padding？
       - Pagemap 使用 Texture2DArray 或者一个巨大的 Linked List / Buffer 保留。 需要进行寻址查询。
-
+  - UE VSM:
+    - shadowmap资源管理：平行光使用Clipmap； 聚光源使用带有Mipmap chain的VSM； 点光源六个面各自对应一张VSM。
+    - 平行光： 
+      - 最多分为22级Mipmap。
+      - 投影矩阵： 覆盖直径作为平行投影的 width、height，半径的一半作为矩阵的 z near，z far 则固定为 0.5。
+      - 对齐ViewTarget： ViewTarget移动了一个Clipmap的半径才进行移动阴影相机。 以ViewTarget为参考确定Clipmap的中心点，但只以能以一个Clipmap半径调整中心点。 这样保证了每个page分配的阴影像素数量是恒定的，避免抖动？ 最重要的是为了方便计算，通过世界点减去中心点，然后除以固定的Page尺寸就得得到相对的逻辑PageOffset。
+      - 所以VSM共用一个Page Table: 总数为21845；（最细的一级为128*128）
+        - Page Table：
+          记录Physical Texture上的Page Offset； 
+          当前指向的阴影的LOD级别与需求的差别等级（0为当前级，X>0 为来自上X级）;
+          bAnyLODValid数据是否有效。
+      - Nanite Shadow:
+        - Instance Culling: 
+          - 对Instance的包围进行视锥剔除； 
+          - 投影是否覆盖到阴影贴图的任何像素中心；
+          - 如果覆盖的Page 都已经Cache，跳过后续。
+        - Cluster Culling： 
+          - 当前Node是否能经过剔除；
+          - 当前Node覆盖的Page是否已经Cache；
+        - 结果写入VSM专用的Visible buffer，因为需要储存Page索引，会比一般的Visible buffer多使用32位。
+      - Virtual Address Translation: 从Vuv 到 Puv的调整方式。
+        - 软光栅：
+          - Per Pixel:  没有 vPage 字段; Rasterization 最终写入像素时（WritePixel 函数）通过 VirtualToPhysicalTexel 函数将虚拟地址转换为物理地址，再将光栅化的 Depth 写入到 Physical Page 中
+          - Per Page: 有 vPage 字段; 用vPage从 Pagemap上查表。
+        - 硬光栅: 一次渲染16个Page，为了并行考虑； 可能导致一个Cluster被多个窗体提交，光栅化，导致浪费。
 多层纹理混合地面使用 ID Tex控制地貌，因为ID Tex本身精度问题导致的Block Artifacts怎么处理：
 - 添加细节： 顶点偏移，高度图，贴图
 - 噪声，抖动，多线性插值

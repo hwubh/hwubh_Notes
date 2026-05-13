@@ -103,11 +103,12 @@ DX12: 打包后kRenderCommand_DrawRendererList 指令在 kRenderCommand_SetShadi
 OpenGLES上： 
 
 
+
 --------------------------
 FrameDebugger： 加一个CombinerOp显示？
 
 --------------------------
-VRS 的设置：
+VRS 的设置： FinalShadingRate在图元装配后，光栅化之前/开始时根据Combiner进行组合得到。
 - DX11:  依赖NVAPI
   - 使用CreateShadingRateResourceView将传入的SRI图包装为 ID3D11NvShadingRateResourceView（向GPU声明该贴图用于决定Shading Rate）
   > Resource View： Resource View（资源视图） 是一种轻量的包装对象，它的作用是告诉 GPU 这块内存数据应该被当成什么、怎么去访问。
@@ -203,6 +204,7 @@ Image-based VRS (Tier 2 VRS):
   - Foveated Rendering： 车机上没有眼球追踪设备，但可以参考赛车游戏的实现？
   - Visible Buffer: Software VRS
     > Visibility Buffer: 本意是用于解决臃肿的Gbuffer带来的开销的方案。 运行时使用一张全屏RT，将InstanceID, TriangleID，MaterialID压缩在一个32位uint中，写入RT中。 着色时通过TriID得到三角形的顶点属性，InsID获取MVP矩阵，MatID获取材质信息。
+    > 可能还需要Barycentric Coord（重心位置）：用于插值顶点属性； Depth Buffer：记录当前像素的深度。
         本质对于一个2\*2 Quad，其四个像素如果被四个不同片元占据的话， 四个片元都会被执行一次（包含辅助像素）。 用V-Buffer可以提前知道像素应该使用哪个片元，避免浪费。 -> 因此对于越小的三角形，其VRS改善的效果越小？
     - 采用Iterative Interpolation的着色思路，以4\*4的像素块为例，分为5个阶段（16 = 2^4; 需要4+1个阶段）分开进行着色。 -> 无法使用片元着色器，只能由computer shader.
       - Pass 0： 选择一个固定的位置的像素进行着色计算。 此外对于周围四个像素的Drawcall ID均不同的像素也需要进行着色计算，保证几何正确性。
