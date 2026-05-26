@@ -76,6 +76,7 @@ Nanite:
     - 维护一个全局的顶点数据和材质贴图表：着色计算时，从顶点数据中根据InstanceID和VertexID获取顶点属性。使用Barycentric Coord 插值顶点属性。 使用materialID获取材质信息。
 
 Mesh Shader: 在硬件层面实现Visible Buffer的计算？ 替代了“Input Assembler → Vertex Shader → Hull Shader → Tessellator → Domain Shader → Geometry Shader ”
+> 可用于GPU skinning / Virtual Geometry? 
 - 输入: 自定义结构，不一定是顶点缓冲； 
 - 处理: 一次处理一个小网格块（Meshlet）
 - 输出: 直接输出最终图元
