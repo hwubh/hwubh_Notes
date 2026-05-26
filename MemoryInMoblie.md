@@ -38,7 +38,7 @@ Nanite:
   - 将Mesh切分为Cluster
     > cluster的优势: 更新粒度的剔除，提升Cache命中率 
     - cluster: 静态构建，使用 HLOD组织。
-  - 在Cluster上用BVH都将HLOD
+  - 在 Cluster 上利用 BVH 来构建 HLOD
   - 压缩顶点属性，Index
 - Procedure
   - Streaming: 从上一帧回读的 Cluster Page Request 数据异步上传 Cluster 渲染数据
