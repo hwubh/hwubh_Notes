@@ -1,3 +1,28 @@
+问题:
+- 未开启ImageVRS时，设置SRI图会导致Editor Crash
+- colorFlags |= kSurfaceCreateShadingRate; 多写了一个
+- Planar 用 Pipeline shading rate
+- RRM 使用Inverse Scale造成的 Encode（A） --> Encode(C) 之间，origin Texture存在的add synchronization 问题。
+- RRM resolve 默认使用 store action
+- RRM 中间只要有setRenderTarget前没有设置RRM，就会导致flush
+- Vulkan demo 中给出的公式好像有问题，关于1*2的UINT值，经测试，应该是1，但是demo中给出的公式(rate_x>>1)|(rate_y<<1)，得到的结果是3. 正确的公式应该是((rate_x >> 1) << 2) | (rate_y >> 1)？ （Foveated Rendering还用的错误的公式）
+- Renderdoc 加载如editor时， DX11 不支持vrs。可能需要改Renderdoc。
+- Render Scale 不等于1 时crash。
+- 申请过大的 R8_UINT 图作为SRI图在DX11上会crash
+- Vulkan 上Foveated Rendering 会覆盖 ImageBasedVRS的设置
+- rasterizationRateMapCaps 可能有重复
+- Editor/Mono/EditorGUI.cs: 支持VT？
+- GFX_SUPPORTS_SHADINGRATE_PERDRAW
+- GL 的跨帧行为正确吗？
+- GL SetCombinerOps/setPipeShadingRate 与 per draw VRS的冲突问题
+- HLSL 中 RW R8_UINT的问题
+- rrm independent stencil texture 
+- VRS in XBOX
+- Rendering Feature Index
+- rasterization rate map caps 可能不准/
+------------------
+- 为什么shading rate 和 combinerops的设置分开写？ ： OpenGLES中是分开的。
+------------------
 移动端VRS支持：
 Adreno GPU
 
@@ -101,7 +126,11 @@ DX12: 打包后kRenderCommand_DrawRendererList 指令在 kRenderCommand_SetShadi
 放在Before里设置Image 好吗？
 --------------------------
 OpenGLES上： 
-
+GfxDeviceGLES::SetRenderTargetsImpl()
+    └── GfxFramebufferGLES::Activate()          // 设置 pending framebuffer -> CreateFramebuffer 绑定 Depth/Stencil Attachments
+        └── GfxFramebufferGLES::Prepare()       // 准备 framebuffer
+            └── GfxFramebufferGLES::MakeCurrentFramebuffer()  // 真正绑定 FBO
+                └── m_Api.BindFramebuffer()     // GL 调用
 
 
 --------------------------
@@ -211,3 +240,69 @@ Image-based VRS (Tier 2 VRS):
       - Pass1： 利用 Pass 0 已有的点，通过“十字交叉”或“对角线”采样，插值出中间点。
       - Pass 2-4：重复此过程，利用已有的（包括插值得出的）像素作为参考，进一步细分网格。
   - DOOM: Variable-Rate Compute Shaders (**VCS**) -> 需要把着色逻辑放在Compute Shader中。
+
+--------------------
+- https://docs.vulkan.org/features/latest/features/proposals/VK_KHR_fragment_shading_rate.html#_per_draw_state
+
+
+---------------------
+RRM: 
+- https://zhuanlan.zhihu.com/p/586856514
+- https://zhuanlan.zhihu.com/p/587988966
+- https://zhuanlan.zhihu.com/p/585309726
+- https://developer.apple.com/documentation/metal/scaling-variable-rasterization-rate-content?language=objc
+- https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf
+- https://docs.google.com/document/d/1ZC2JaRN21v9nMm-73492wRdk4ybvTJ8Li983DLgeiAY/edit?pli=1&tab=t.0
+
+VRS: 
+- https://zhuanlan.zhihu.com/p/628429688
+- https://zhuanlan.zhihu.com/p/585309726
+- https://discussions.unity.com/t/optimize-renderer-features-with-variable-rate-shading-in-unity-6-1/1605893
+- https://docs.vulkan.org/features/latest/features/proposals/VK_KHR_fragment_shading_rate.html
+- https://docs.vulkan.org/samples/latest/samples/extensions/fragment_shading_rate_dynamic/README.html#_shading_rate_image
+- https://zhuanlan.zhihu.com/p/16771987518
+- https://docs.nvidia.com/nvapi/group__nvapitypes.html#ga56d116a83e80cdf3777e7fa1b5d200dc
+- https://docs.nvidia.com/nvapi/group__dx.html#ga03d79649623a7f5d76d5dfbdbc2dad31
+- https://developer.nvidia.com/blog/turing-variable-rate-shading-vrworks/
+- https://docs.nvidia.com/nvapi/globals_eval_n.html
+- https://learn.microsoft.com/zh-cn/windows/win32/api/d3d12/ne-d3d12-d3d12_shading_rate      
+- https://docs.vulkan.org/refpages/latest/refpages/source/vkGetPhysicalDeviceFragmentShadingRatesKHR.html
+- https://registry.khronos.org/OpenGL/extensions/NV/NV_shading_rate_image.txt
+- https://registry.khronos.org/OpenGL/extensions/EXT/EXT_fragment_shading_rate.txt
+- https://github.com/NVIDIA/nvapi
+- https://devblogs.microsoft.com/directx/gears-vrs-tier2/#vrs-texture-generation
+- https://zhuanlan.zhihu.com/p/525804724
+- https://gpuopen.com/learn/integrating-vrs-in-the-riftbreaker/
+- https://zhuanlan.zhihu.com/p/2017375769647669935
+- https://static.graphicsprogrammingconference.com/public/2025/slides/variable-rate-compute-shaders-in-doom/Fuller-Hammer-variable-rate-compute-shaders-in-doom-the-dark-ages.pdf
+- https://zhuanlan.zhihu.com/p/138024983
+- https://zhuanlan.zhihu.com/p/639479470
+- https://registry.khronos.org/OpenGL/extensions/QCOM/QCOM_shading_rate.txt
+- https://zhuanlan.zhihu.com/p/713593072
+- Sig20_VRS_final_final_DROBOT
+- https://filmicworlds.com/blog/software-vrs-with-visibility-buffer-rendering/
+- https://zhuanlan.zhihu.com/p/683761529
+- https://zhuanlan.zhihu.com/p/560714968
+- https://github.com/GameTechDev/VRS-DoF
+- https://www.zhihu.com/question/340549627
+- https://zhuanlan.zhihu.com/p/626821650
+- https://zhuanlan.zhihu.com/p/628429688
+- https://www.blurredcode.com/2025/06/491d0591/#%E7%A1%AC%E4%BB%B6%E5%85%BC%E5%AE%B9%E6%80%A7%E9%97%AE%E9%A2%98
+- https://developer.arm.com/Additional%20Resources/Video%20Tutorials/DevHub/Enhancing%20mobile%20game%20performance%20with%20Variable%20Rate%20Shading
+- https://microsoft.github.io/DirectX-Specs/d3d/VariableRateShading.html
+- https://forums.unrealengine.com/t/implementing-image-based-variable-rate-shading/1900726/6
+- https://docs.unity3d.com/6000.1/Documentation/ScriptReference/Rendering.CommandBuffer.SetShadingRateImage.html?ampDeviceId=ddda3701-d887-48ef-8642-581b5c771bec&ampSessionId=1775016286272&ampTimestamp=1775211777505
+- https://www.intel.com/content/www/us/en/developer/articles/technical/velocity-luminance-adaptive-rasterization.html
+- https://filmicworlds.com/blog/decoupled-visibility-multisampling/
+- https://filmicworlds.com/blog/software-vrs-with-visibility-buffer-rendering/
+- https://developer.samsung.com/galaxy-gamedev/blog/en/2022/11/22/using-variable-rate-shading-to-improve-performance-on-mobile-games
+- https://registry.khronos.org/OpenGL/api/GL/glext.h
+- https://github.com/Microsoft/DirectX-Graphics-Samples/tree/develop/Samples/Desktop/D3D12VariableRateShading
+- https://developer.arm.com/community/arm-community-blogs/b/mobile-graphics-and-gaming-blog/posts/using-asynchronous-compute-on-arm-mali-gpus
+- https://learn.microsoft.com/en-us/windows/win32/direct3d12/vrs
+- https://d29g4g2dyqv443.cloudfront.net/sites/default/files/akamai/gameworks%2Fevents%2Fcgdc16%2Fcem_vrworks_cgdc_cn.pdf
+- https://github.com/jp7677/dxvk-nvapi
+- https://discussions.unity.com/t/multi-res-shading-nvapi/614100/9
+- https://github.com/KhronosGroup/GLSL/blob/main/extensions/ext/GLSL_EXT_fragment_shading_rate.txt
+- https://developer.mediatek.com/VariableRateShading/6554775458a7392014e51c52.html
+- https://developer.download.nvidia.com/video/gputechconf/gtc/2019/presentation/s9209-advances-in-real-time-automotive-visualisation.pdf

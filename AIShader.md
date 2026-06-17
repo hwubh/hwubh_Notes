@@ -1,0 +1,9 @@
+- https://docs.nvidia.com/nim/benchmarking/llm/latest/step-by-step.html
+- https://github.com/ai-dynamo/aiperf
+- https://zhuanlan.zhihu.com/p/148066417
+- https://zhuanlan.zhihu.com/p/21979494450
+- https://www.youtube.com/watch?v=Sq3-4sYh664
+- https://devblogs.microsoft.com/pix/timing-captures/
+- https://zhuanlan.zhihu.com/p/2039072048970978647
+- https://github.com/Besty0728/Unity-Skills
+- https://diarychris.info/blog/2021/05/01/Unity%20&%20Nsight%20Graphics%20GPU%20Profiling%20Workflow/

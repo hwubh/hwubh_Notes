@@ -1,0 +1,17 @@
+- https://chengtsolin.wordpress.com/2015/03/30/project-cubemap-to-octahedral-map/
+- https://gpuopen.com/learn/fetching-from-cubes-and-octahedrons/
+- https://zhuanlan.zhihu.com/p/404520592
+- https://zhuanlan.zhihu.com/p/4648572540
+- https://www.zhihu.com/question/4852981436
+- https://zhuanlan.zhihu.com/p/408898601
+- file:///C:/Users/honglin.wu/Downloads/siggraph_mmg_2024_HypeHype.pdf
+- [cubemap "Octahedral" map](https://gamedev.stackexchange.com/questions/169508/octahedral-impostors-octahedral-mapping)
+- https://www.cnblogs.com/KillerAery/p/16828304.html#reflection-probe
+- https://github.com/mabuware/CubeMapToOctMap/tree/master
+- https://catlikecoding.com/unity/tutorials/procedural-meshes/octasphere/
+- https://www.shadertoy.com/view/43G3Dd
+- https://www.alexisgiard.com/icosahedron-sphere/
+- https://zhuanlan.zhihu.com/p/711117213
+- https://zhuanlan.zhihu.com/p/711117213
+- https://www.shadertoy.com/view/MdsfzN
+- 

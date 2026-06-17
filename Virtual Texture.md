@@ -125,3 +125,13 @@
 - 1：考虑到我们SVT占据的包体过大，而效果也不算太好，采用PVT方案在运行时实时生成地形更能符合项目的要求。 目前考虑在渲染将山体，岩石，贴花等不可交互的固定物体都渲染至physical texture上。
 - 2：目前考虑到当相机离地表最近时，在地表上占据大约86 * 53大小的矩形，为保证屏幕内地形的精度达标，目前是考虑使用申请一张 3 * 3 * 1280 * 640 的physical texture用于缓存
 - physical texture 中一个block -->
+
+
+------------------------
+- https://zhuanlan.zhihu.com/p/672217168
+- https://zhuanlan.zhihu.com/p/685872448
+- https://zhuanlan.zhihu.com/p/1985504758451172100
+- https://zhuanlan.zhihu.com/p/373969159
+- https://zhuanlan.zhihu.com/p/1973068100296527933
+- https://zhuanlan.zhihu.com/p/1928153095868768864
+- 
