@@ -41,7 +41,7 @@ Nanite:
   - 将Mesh切分为Cluster
     > cluster的优势: 更新粒度的剔除，提升Cache命中率 
     - cluster: 静态构建，使用 HLOD组织。
-  - 在Cluster上用BVH都将HLOD
+  - 在 Cluster 上利用 BVH 来构建 HLOD
   - 压缩顶点属性，Index
 - Procedure
   - Streaming: 从上一帧回读的 Cluster Page Request 数据异步上传 Cluster 渲染数据
@@ -65,6 +65,7 @@ Nanite:
       > 小三角形容易造成Quad Overdraw？
     - 软件光栅化： 小三角形使用Compute Shader写成的软光栅化； 每个Cluster对应一个线程组， 先算出所有顶点的剪裁空间坐标存入Shared Memory中。 然后每个线程读取对应三角形的Index Buffer和变换后的Vertex Position，根据Vertex Position计算出三角形的边，执行背面剔除和小三角形（小于一个像素）剔除，然后利用原子操作完成Z-Test，并将数据写进Visibility Buffer。
       > Nanite Mesh 不支持顶点位置会发生变化，带有Mask的Mesh
+      > 区分“大三角形”和“小三角形”：三角形在屏幕上的投影大小。如果包围盒在任一轴向上的尺寸小于阈值，该三角形就被归为“小三角形”。
   - EmitDepthTargets: 
     - Nanite Mask: 计算当前像素是否是Nanite Mesh
     - Scene Depth Buffer: 根据Nanite Mask将Visible buffer 写入场景的 depth buffer中
@@ -78,6 +79,7 @@ Nanite:
     - 维护一个全局的顶点数据和材质贴图表：着色计算时，从顶点数据中根据InstanceID和VertexID获取顶点属性。使用Barycentric Coord 插值顶点属性。 使用materialID获取材质信息。
 
 Mesh Shader: 在硬件层面实现Visible Buffer的计算？ 替代了“Input Assembler → Vertex Shader → Hull Shader → Tessellator → Domain Shader → Geometry Shader ”
+> 可用于GPU skinning / Virtual Geometry? 
 - 输入: 自定义结构，不一定是顶点缓冲； 
 - 处理: 一次处理一个小网格块（Meshlet）
 - 输出: 直接输出最终图元
