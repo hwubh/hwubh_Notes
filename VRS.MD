@@ -20,6 +20,9 @@
 - VRS in XBOX
 - Rendering Feature Index
 - rasterization rate map caps 可能不准/
+- FrameDebugger tileSize没显示
+- ShadingRateTileSize 改为写明 = 8， = 116， = 32；
+- VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR 没开启
 ------------------
 - 为什么shading rate 和 combinerops的设置分开写？ ： OpenGLES中是分开的。
 ------------------
@@ -90,6 +93,8 @@ Primitive attribute
 --------------------------
 
 vulkan support vrs attachment:
+- create Pipeline 要声明VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR，不然改不了shadingrate 和 combinerops
+
 - create VKImage with flag VK_IMAGE_USAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR：RenderTexture：：Create（） -> device.CreateRenderColorSurface -> VK CreateColorRenderSurfacePlatform -> VK CreateColorSurfaceImpl, CHECK FLAG(RenderTexture的serialized 属性，要修改transfer版本) VK_IMAGE_USAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR
 
 UpdateShadingRate -》 CreateRenderPass2 -》 CreateRenderPass -》 GetPackedRenderPass -》SetRenderPassSetup（ GetRenderPass？）， 根据 MakeCompatibilityRenderPassDescription进行判断 -》 SetRenderTargetsImpl？ 
@@ -200,7 +205,7 @@ Image-based VRS (Tier 2 VRS):
     - Merge the VRS texture generation to be part of tonemapping： 将SRI 图的生成放在Tonemapping的最后一步中。 避免作为独立的pass，还需要另外读入framebuffer，造成带宽消耗。（不过就没法用compute shader了？）
     - Running the VRS texture generation on the Async Compute Queue: 异步生成SRI 图，因为在下一帧的开始阶段，最先执行的时Z-Prepass，不需要进行着色计算，可以在这个阶段，计算执行SRI图的生成。
         > Mobile 上支持这种异步吗？
-    - 对于使用Compute Shader进行计算的pass，因为无法依赖硬件进行Shading Rate的读取。需要将整张SRI图读取进来，根据读取道德Shading Rate来决定哪些Thread直接return。用剩下的Thread扩大采样范围，填补被杀掉的线程留下的空袭。
+    - 对于使用Compute Shader进行计算的pass，因为无法依赖硬件进行Shading Rate的读取。需要将整张SRI图读取进来，根据读取到的Shading Rate来决定哪些Thread直接return。用剩下的Thread扩大采样范围，填补被杀掉的线程留下的空袭。
     - 对于Denoiser pass： VRS会导致噪点增多，Denoiser需要读取SRI图, 根据当前区域的Shading Rate来调整模糊的权重。Shading Rate越大，权重值越大，用更强的平滑度来弥补欠采样的问题。
     - 如果开启了DRS导致SRI图与color attachment的tile数量不符，需要通过Down/up scale SRI图进行匹配。
     ![20260330114858](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260330114858.png) 
