@@ -1,4 +1,4 @@
-- 1: 蛮啾: https://app.mokahr.com/apply/manjiu/40770#/?anchorName=default_banner&sourceToken=
+- 1: 蛮啾: https://ooia5293gn.jobs.feishu.cn/index/position/7513877615992801599/detail ； https://ooia5293gn.jobs.feishu.cn/index/position/7513883937480706331/detail
 - 2: 米哈游：https://jobs.mihoyo.com/#/position?jobName=&competencyTypes%5B0%5D=1&addressIds%5B0%5D=1&addressIds%5B1%5D=8&addressIds%5B2%5D=13
 - 3：鹰角：https://jobs.hypergryph.com/apply/hypergryph/26325/#/jobs?zhineng=72529&location=%E4%B8%8A%E6%B5%B7%E5%B8%82&page=1
 - 4：乐元素：https://www.zhipin.com/gongsi/job/c101020100/b8f3202d5736c5481nN539u1.html
@@ -7,4 +7,45 @@
 - 7：网易雷火：https://leihuo.163.com/joinus.html （无限大只招客户端）
 - 8：萨罗斯（深圳，杭州）：https://www.zhipin.com/gongsi/job/c101210100/3400b007eeca01e51HZ82t26ElE~.html（引擎好像Unity/UE都行）
 - 9：英雄游戏（杭州，上海的不确定是不是二次元）：https://careers.hero.com/social-recruitment/yingxionghr/100103/#/jobs?zhineng%5B0%5D=18814&page=1&anchorName=jobsList&location%5B0%5D=%E6%9D%AD%E5%B7%9E%E5%B8%82
-- 10：
+
+---------------
+
+<!-- - 1: 沐瞳 https://moonton.jobs.feishu.cn/index/position/7576227122361633067/detail -->
+<!-- - 2：莉莉丝： 
+  - https://lilithgames.jobs.feishu.cn/career/position/7602943151921285403/detail
+  - https://lilithgames.jobs.feishu.cn/career/position/7569066124148017451/detail
+  - https://lilithgames.jobs.feishu.cn/career/position/7611111965083142436/detail -->
+- 3：叠纸：
+  - https://career.papegames.com/social/position/7506782068869990694/detail
+  - https://career.papegames.com/social/position/7597720125504457023/detail
+  - https://career.papegames.com/social/position/7506878741902199066/detail
+- 4: 乐元素：
+  - https://www.zhipin.com/gongsi/job/c101020100/100000/b8f3202d5736c5481nN539u1.html
+  - https://www.zhipin.com/gongsi/job/c101020100/100000/b8f3202d5736c5481nN539u1.html
+- 5：鹰角
+  - https://jobs.hypergryph.com/apply/hypergryph/26325/#/job/7ac0d488-efc3-4405-ba7b-74b7759dacd8
+  - https://jobs.hypergryph.com/apply/hypergryph/26325/#/job/2212e408-5464-43bd-bf26-ab611b345318
+  - https://jobs.hypergryph.com/apply/hypergryph/26325/#/job/c093d8e0-0955-41b2-b531-9d237972b447
+- 6：蛮啾:
+  - https://ooia5293gn.jobs.feishu.cn/index/position/7513877615992801599/detail ； 
+  - https://ooia5293gn.jobs.feishu.cn/index/position/7513883937480706331/detail
+- 7：巨人：
+  - https://app.mokahr.com/apply/ztgame/37485/#/job/2b9f736c-c847-4746-92c0-1983fb62fccb
+- 8: 腾讯
+  - https://careers.tencent.com/jobdesc.html?postId=2001488406366019584
+  - https://careers.tencent.com/jobdesc.html?postId=2006154940619313152
+  - https://careers.tencent.com/jobdesc.html?postId=2033809378322317312
+- 9：米哈游
+  - https://jobs.mihoyo.com/#/position/2017
+  - https://jobs.mihoyo.com/#/position/5817
+  - https://jobs.mihoyo.com/#/position/6282
+- 10: 爆散
+  - https://app.mokahr.com/social-recruitment/micateam/142158?locale=zh-CN#/job/b065dcb0-c3f5-44c6-96a1-df668a8fde99
+  - https://app.mokahr.com/social-recruitment/micateam/142158?locale=zh-CN#/job/94f97aa7-ec29-4e3f-b51d-9eb8fcdb7382
+  - https://app.mokahr.com/social-recruitment/micateam/142158?locale=zh-CN#/job/702b86d7-ecbe-4f2d-a997-6d8e119e2574
+- 11: EA
+  - https://jobs.ea.com/en_US/careers/JobDetail/212254-Technical-Artist-Tech/212254
+- 12: 竹子
+  - https://www.zhipin.com/gongsi/job/100000/2414e3b0ca39fb231nV_3t28E1Q~.html
+- 13：网易
+  - 

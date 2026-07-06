@@ -125,7 +125,7 @@ VRS 的设置： FinalShadingRate在图元装配后，光栅化之前/开始时�
   - 使用RSSetShadingRateImage将SRI绑定到图形命令列表的特定槽位。
 
 OpenGLES: 要求扩展 
-  - 通过glFramebufferShadingRateEXT (GLenum target, GLenum attachment, GLuint texture, GLint baseLayer, GLsizei numLayers, GLsizei texelWidth, GLsizei texelHeight) 将 SRI图，TileSize绑定到具体的FBO上。 baseLayer：使用“texture” （SRI）的第几层开始；numLayers：使用“texture” 几层作为SRI进行绑定。 比如如果时VR的话，因为存在两个视图，就可以绑定两层（数量受GL_MAX_FRAGMENT_SHADING_RATE_ATTACHMENT_LAYERS_EXT控制）。 target为绑定目标”（Binding Target）枚举： 多为 GL_FRAMEBUFFER 或 GL_DRAW_FRAMEBUFFER。
+  - 通过glFramebufferShadingRateEXT (GLenum target, GLenum attachment, GLuint texture, GLint baseLayer, GLsizei numLayers, GLsizei texelWidth, GLsizei texelHeight) 将 SRI图，TileSize绑定到具体的FBO上。 baseLayer：使用“texture” （SRI）的第几层开始；numLayers：使用“texture” 几层作为SRI进行绑定。 比如是VR的话，因为存在两个视图，就可以绑定两层（数量受GL_MAX_FRAGMENT_SHADING_RATE_ATTACHMENT_LAYERS_EXT控制）。 target为绑定目标”（Binding Target）枚举： 多为 GL_FRAMEBUFFER 或 GL_DRAW_FRAMEBUFFER。
   >  glBindFramebuffer 可以把 FBO对象绑定到绑定目标”（Binding Target）枚举上。
   - 通过glShadingRateCombinerOpsEXT设置当前CombinerOps
 
