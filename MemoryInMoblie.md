@@ -16,6 +16,9 @@ GPU Architecture：
   - SRP Batching: 针对前两点 -> 合并了PSO的设置以及材质对应的PerMaterialBuffer的绑定；
   - Static/Dynamic Batching: 通过合并相同材质的Mesh以减少Drawcall。
   - Bindless: 优化资源绑定开销和绘制指令调用开销. 允许绑定固定/不定长度的描述符到GPU，将绑定纹理的步骤从CPU转移到了GPU。 因此通过PerInstance 数据里增加一个纹理 ID，指向 Bindless 堆，从而实现“一个 DrawCall 画不同纹理的物体”。 
+    - https://zhuanlan.zhihu.com/p/408330710
+    - https://zhuanlan.zhihu.com/p/15560088727
+    - 
   - PSO缓存？
 - Binding Mode: OpenGL 和早期DX上限制了Shader可以访问的贴图数量(对应有几个槽位Slot). CPU 在渲染前，必须显示调用指令"BindTexture(MyTexture, Slot 0)". Shader中写死：layout(binding = 0) sampler2D myTex;。 Slot不够时可以使用VT方案或Texture Atlas, TextureArray来节省Slot.
   - Bnindless(Unbounded)： 将 Buffer\Texture 的 GPU 虚拟地址存储在 Bindless Buffer 中，在 Shader 中通过索引 Bindless 而直接访问 Texture\Buffer 数据的技术。
@@ -38,7 +41,7 @@ Nanite:
   - 将Mesh切分为Cluster
     > cluster的优势: 更新粒度的剔除，提升Cache命中率 
     - cluster: 静态构建，使用 HLOD组织。
-  - 在Cluster上用BVH都将HLOD
+  - 在 Cluster 上利用 BVH 来构建 HLOD
   - 压缩顶点属性，Index
 - Procedure
   - Streaming: 从上一帧回读的 Cluster Page Request 数据异步上传 Cluster 渲染数据
@@ -62,6 +65,7 @@ Nanite:
       > 小三角形容易造成Quad Overdraw？
     - 软件光栅化： 小三角形使用Compute Shader写成的软光栅化； 每个Cluster对应一个线程组， 先算出所有顶点的剪裁空间坐标存入Shared Memory中。 然后每个线程读取对应三角形的Index Buffer和变换后的Vertex Position，根据Vertex Position计算出三角形的边，执行背面剔除和小三角形（小于一个像素）剔除，然后利用原子操作完成Z-Test，并将数据写进Visibility Buffer。
       > Nanite Mesh 不支持顶点位置会发生变化，带有Mask的Mesh
+      > 区分“大三角形”和“小三角形”：三角形在屏幕上的投影大小。如果包围盒在任一轴向上的尺寸小于阈值，该三角形就被归为“小三角形”。
   - EmitDepthTargets: 
     - Nanite Mask: 计算当前像素是否是Nanite Mesh
     - Scene Depth Buffer: 根据Nanite Mask将Visible buffer 写入场景的 depth buffer中
@@ -75,6 +79,7 @@ Nanite:
     - 维护一个全局的顶点数据和材质贴图表：着色计算时，从顶点数据中根据InstanceID和VertexID获取顶点属性。使用Barycentric Coord 插值顶点属性。 使用materialID获取材质信息。
 
 Mesh Shader: 在硬件层面实现Visible Buffer的计算？ 替代了“Input Assembler → Vertex Shader → Hull Shader → Tessellator → Domain Shader → Geometry Shader ”
+> 可用于GPU skinning / Virtual Geometry? 
 - 输入: 自定义结构，不一定是顶点缓冲； 
 - 处理: 一次处理一个小网格块（Meshlet）
 - 输出: 直接输出最终图元
@@ -211,3 +216,30 @@ TBDR
   https://www.zhihu.com/question/427803115
   https://zhuanlan.zhihu.com/p/1923685725662081189
   https://zhuanlan.zhihu.com/p/2759747438
+  https://zhuanlan.zhihu.com/p/327045410
+  https://www.zhihu.com/question/499462755/answer/2237765936
+  https://zhuanlan.zhihu.com/p/548061975
+  https://zhuanlan.zhihu.com/p/433254219
+  https://zhuanlan.zhihu.com/p/413922077
+  https://zhuanlan.zhihu.com/p/347001411
+  https://zhuanlan.zhihu.com/p/670673683
+  https://zhuanlan.zhihu.com/p/654020345
+  https://zhuanlan.zhihu.com/p/656933750
+  https://zhuanlan.zhihu.com/p/648334800
+  https://x.com/ogawa_tter/status/1331382336236097536
+  https://zhuanlan.zhihu.com/p/1919000886363022516
+  https://www.zhihu.com/question/296664537
+  https://zhuanlan.zhihu.com/p/2005674083338180164
+  https://zhuanlan.zhihu.com/p/2759747438
+  https://zhuanlan.zhihu.com/p/57661927
+  https://diaryofagraphicsprogrammer.blogspot.com/2018/03/triangle-visibility-buffer.html
+  https://filmicworlds.com/blog/decoupled-visibility-multisampling/
+  https://zhuanlan.zhihu.com/p/691796671
+  https://zhuanlan.zhihu.com/p/33881861
+  https://zhuanlan.zhihu.com/p/374921113
+  https://zhuanlan.zhihu.com/p/1991557277451305725
+  https://developer.unity.cn/projects/613acaceedbc2a0021ab14f8
+  https://zhuanlan.zhihu.com/p/53092784
+  https://zhuanlan.zhihu.com/p/383793695
+  https://zhuanlan.zhihu.com/p/2029571473514211192
+  
