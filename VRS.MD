@@ -123,6 +123,31 @@ Vk中设置VRS SRI 图要注意两点，一个是要确保SRI图被附加到了*
 
 VulkanCapsViewer ： 可用于查看Vulkan扩展
 
+NativeRenderPass需要在构建时知晓下属subpass所需要使用的所用 sri图。
+所有 attachment 在 VkRenderPassCreateInfo 中全局声明，每个 subpass 通过
+  index 引用：
+
+   VkRenderPassCreateInfo2KHR
+     .pAttachments[]          ← 全局 attachment 列表
+       [0] color texture
+       [1] depth texture
+       [2] shading rate texture A
+       [3] shading rate texture B
+     .pSubpasses[]
+       [0] VkSubpassDescription2KHR
+         .pColorAttachments → [0]           ← 引用 attachment[0]
+         .pDepthStencilAttachment → [1]     ← 引用 attachment[1]
+         .pNext → VkFragmentShadingRateAttachmentInfoKHR
+                   .pFragmentShadingRateAttachment → attachment = 2  ← 引用 attachment[2]
+       [1] VkSubpassDescription2KHR
+         .pColorAttachments → [0]
+         .pDepthStencilAttachment → [1]
+         .pNext → VkFragmentShadingRateAttachmentInfoKHR
+                   .pFragmentShadingRateAttachment → attachment = 3  ← 引用 attachment[3]
+
+  attachment 列表是 RenderPass 级别的，subpass 只引用 index。所以不同的 subpass 使用不同的 shading rate texture，这些
+  texture 必须在同一个 `BeginRenderPass` 时就全部声明。
+
 --------------------------
 DX12 上可以使用PIX来查看 Shading Rate情况，不过需要使用DXIL(HLSLPROGRAM 中添加 *#pragma use_dxc* 来强制使用)
 
