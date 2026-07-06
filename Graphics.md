@@ -37,7 +37,7 @@
 
 - 3：Color Space：https://zhuanlan.zhihu.com/p/548826041 ; https://zhuanlan.zhihu.com/p/66558476 ; https://zhuanlan.zhihu.com/p/609569101
   ![20240610133007](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240610133007.png)
-  - Gamma：2.2，屏幕输出时会将颜色变换到Gamma2.2空间中：$l = u^2.2, (l,u \in (0,1))$
+  - Gamma：2.2，屏幕输出时会将颜色变换到Gamma2.2空间中：$l = u^{2.2}, (l,u \in (0,1))$
   - Gamma矫正：$\frac 1 {2.2}$, 在屏幕输出前转到Gamma0.45，使屏幕最终输出转为Gamma1.0：$u_0 = u_i^{\frac{1}{2.2}}$
   - sRBG: Gamma0.45 Color Space
     - Why: <!-- 1: 存储时进行Gamma矫正；2： -->人眼对暗部更敏感，用更大的数据范围来存暗色，用较小的数据范围来存亮色。（下注）
@@ -48,9 +48,9 @@
              因此，通常（相机/贴图）实际记录的是感知亮度。将接收的的物理亮度转化为感知亮度的过程称为**gamma encode**或**Image File gamma**。 将记录的感知亮度转化为物理亮度并发射称为**gamma decode**或**display gamma**。将前两者的乘积（多为*1*），称为**System gamma**。
     - Shader中的处理： 实际运算需现将**感知亮度**（sRGB贴图中的texel值）通过^2.2(**Remove Gamma Correction**)转换成**物理亮度**再实际进行。计算结束后需将结果再通过^0.45(**Gamma Correction**)转化为**感知亮度**。
     - 贴图：一般Diffuse（albedo）为sRBG, 而specular maps、normal maps，light maps，一些HDR格式的图片为线形物理空间（物理亮度）的贴图，以节省转换。
-  - Unity：如果选择了Gamma，那Unity不会对输入和输出做任何处理，换句话说，Remove Gamma Correction 、Gamma Correction都不会发生，除非你自己手动实现；而Linear则对Shaderlab中的*颜色*输入，有[Gamma]前缀的Property变量（如*金属度*）以及在*sRGB Texture*采样时进行Remove Gamma Correction。
-  - Gamma空间：使用非sRGB diffuse图时可以节省一步Remove Gamma Correction运算。 -> (8-bit通道里，暗部精度应该会有问题？)
-  - Linear空间：使用sRGB diffuse时美术查看效果方便，shader中可以不用写Remove Gamma Correction。但Gamma Correction必不可少。
+  - Unity：如果选择了Gamma，那Unity不会对输入和输出做任何处理，换句话说，Remove Gamma Correction 、Gamma Correction都不会发生，除非你自己手动实现；而Linear则对Shaderlab中的*颜色*输入，有[Gamma]前缀的Property变量（如*金属度*）以及在*sRGB Texture*采样前进行Remove Gamma Correction。![20241211212716](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/c49c8f7f9a61694ca2712114705e41c5.png)
+  - Gamma空间：使用非sRGB diffuse图时可以节省一步Remove Gamma Correction运算。
+  - Linear空间：使用sRGB diffuse时美术查看效果方便，shader中可以不用写Remove Gamma Correction。但Remove Gamma Correction必不可少。
 
 - 4：卷积：两个函数（输入函数：f(x), 权值函数：g(x)）的卷积，本质上就是先将一个函数翻转，然后进行滑动叠加。
      卷积的本质就是加权积分, 对于（输入函数：f(x), 权值函数：g(x)）来说，g是f的权值函数，表示输入f各个点对输出结果的影响大小。数学定义∑f(x)g(n-x)中的n-x表示x的权值和什么相关，也可以理解为一种约束。![20240616182256](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/20240616182256.png)
