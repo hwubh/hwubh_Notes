@@ -189,6 +189,7 @@ OpenGLES: 要求扩展
   - 通过glShadingRateCombinerOpsEXT设置当前CombinerOps
 
 Vulkan: Vulkan 1.2以上
+  - 创建PSO时， 要设置 VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR。 
   - 通过vkCmdSetFragmentShadingRateKHR 设置Pipeline shading rate 和 combinerOps
   - 创建VkFragmentShadingRateAttachmentInfoKHR(sType 为VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR)，其成员包含 SRI图， TileSize和一个用于未来扩展的pNext指针。
   - 在vkCreateRenderPass2 renderpass的subpass 的pNext 上挂载VkFragmentShadingRateAttachmentInfoKHR结构体。
