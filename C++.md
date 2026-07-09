@@ -7,11 +7,18 @@ Construct
 - Conversion Constructor： 使用隐式类型转换
 
 智能指针：利用 RAII (资源获取即初始化) 机制来自动管理内存
-- unique_ptr： 同一时间只有一个指针拥有该资源； 禁用拷贝构造，支持移动构造。
-- shared_ptr： 允许多个指针指向同一个对象；支持拷贝构造，每拷贝一个 shared_ptr，内部的内部的引用计数就会加 1； 移动构造不会增加计数，而是直接转移控制权。 会多占据一块内存用于计数器。
+- unique_ptr： 同一时间只有一个指针拥有该资源； 禁用拷贝构造，支持移动构造 -> 保证唯一性。
+- shared_ptr： 允许多个指针指向同一个对象；支持拷贝构造，每拷贝一个 shared_ptr，控制块关于shared_ptr的引用计数(use_count)就会加 1； 移动构造不会增加计数，而是直接转移控制权。 会多占据一块内存用于计数器。
 - weak_ptr: 弱引用，指向shared_ptr所管理的对象, 但不会改变 shared_ptr的引用计数。不论是否有weak_ptr指向，一旦最后一个指向对象的shared_ptr被销毁，对象就会被释放。 用于缓存对象， 因为不受生命周期的影响？ 
   - 可用于避免**循环引用**： 两个对象 A 和 B 互相持有对方的 shared_ptr。当外部作用域结束时，A 等待 B 释放，B 等待 A 释放，导致引用计数永远无法归零
 - 引用计数是线程安全的，因为它的增加是一个原子操作，但是管理的资源不是线程安全的。 -> 多线程同时读（Get 或 Copy）是安全的，因为拷贝是原子操作。 多线程写入（Reset 或 让指针指向别的对象）是不安全的。 不同的shared_ptr(实例)被多个线程读写，是线程安全的（因为改变的指针实例而不是指向的对象实例）。
+- 控制块是独立于shared_ptr的，再堆上。 shared_ptr本身只占16字节，包含两个指针，一个__ptr指向托管对象的指针。 一个__pn指向控制块。 当强引用计数 use_count和 弱引用计数 weak_count都为0才会释放控制块。 
+  - 组成: 
+    - use_count（强引用计数）
+    - weak_count（弱引用计数）
+    - 删除器（Deleter）
+    - 分配器（Allocator）
+  > 引用计数归零，拆的是“房子”（托管对象内存），撕掉的是“门牌号”（__ptr 指向的地址值），但“门牌本”（shared_ptr 对象本身）还留在你的桌子上，直到你扔掉这个本子（离开作用域）。
 - 根据裸指针构建智能指针时需要使用shared_from_this()，不能直接用 std::shared_ptr<T>(this)， 不然不会共享控制块。 -> 拿到的是shared_ptr。先创建weak_ptr，然后通过_M_weak_this.lock()。 -> 只有继承了enable_shared_from_this的this能通过shared_from_this()构建智能指针。 <-> 如果已知智能指针，直接通过拷贝构造函数创建新的智能指针实力即可。
 
 数据结构：
@@ -26,3 +33,28 @@ Construct
 > 链表 和 数组遍历谁快： 数组在内存上是连续的，对于CPU缓存来说，其不需要像访问链表的元素那样，不停地访问内存。
 
 线程安全： 如果一个类不需要动进行同步，上锁等操作就能被多线程正常使用的。 
+
+多线程：
+- std::thread: C++11 引入, 把函数(callable 类型的所有对象, 即后面可以加**()调用**的东西，如普通函数、类成员函数、Lambda表达式和仿函数（Functor， 重载了 operator() 的类实例）)传入以使用。
+  ``` C++
+  void func(int *a, int n);
+  int buffer[10];
+  thread t(func, buffer, 10);
+  t.join();
+  ```
+- t.join() 与 t.detach(): join 会阻塞当前线程: 是必须等待启动的线程完成后才会继续往下执行; detach 不会阻塞，而是将启动的线程放在后台运行：相当于是一个守护线程（daemon 线程）； 
+  - joinable() == true 时说明该线程可以进行join 或 detach； detach 声明放弃线程管理权，交给系统在后台管理，joinable() 会直接变成 false； joint直到运行完成后销毁线程，回收资源，joinable() 才会变为 false；
+- 传参：按传入函数的参数顺序； 默认以拷贝的方式复制到线程内部，即便参数的类型是引用。 如果希望传入引用，需要显式地用 std::ref 注明。
+  ``` C++
+  void add1(int &a) {
+    a++;
+  }
+
+  int main() {
+      int a = 1;
+      std::thread t(add1, std::ref(a));
+      t.join();
+      std::cout << a << std::endl;    // 将输出 2
+  }
+  ```
+- detach的悬空指针问题: ![20260709162928](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260709162928.png)
