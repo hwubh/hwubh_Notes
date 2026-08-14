@@ -39,6 +39,11 @@ Metal SIMD-group
 
 https://zhuanlan.zhihu.com/p/469436345
 
+--------------------------------------
+#pragma use_dxc
+#pragma require wavebasic quadshuffle
+-----------------------------------
+
 ## ddx/ddy 在全屏 Blit Pass 中失效的实测分析
 
 ### 背景
