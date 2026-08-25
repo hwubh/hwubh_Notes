@@ -15,7 +15,7 @@
 > 
 常见的着色频率(shading rate)输入包含 **pipelne shading rate**, **attachment shading rate** 和 **primitive shading rate**，三者的控制粒度大致上是从粗到细的。
 Pipeline shading rate (Per Drawcall)是最基础的全局设置。其的粒度为Drawcall的，一般通过dynamic state在不同Drawcall之间动态设置。
-Attachment shading rate (Per attachment) 通过绑定一张R8_UINT格式的屏幕空间图像附件(Shading Rate Image, SRI)进行直到。其粒度为 $8\times8 \to 32\times32$ 的像素块，图像附件上一个像素对应屏幕上一个像素块范围内的着色频率。
+Attachment shading rate (Per attachment) 通过绑定一张R8_UINT格式的屏幕空间图像附件(Shading Rate Image, **SRI**)进行直到。其粒度为 $8\times8 \to 32\times32$ 的像素块，图像附件上一个像素对应屏幕上一个像素块范围内的着色频率。
 > 一般来说SRI通过亮度差或速度来决定像素块的着色频率。前者对画面中颜色相近的区域降低着色频率；后者对移动幅度大的区域降低着色频率。 [1]
 > Vulkan中需要注意SRI是在RenderPass Attachments中的，需要在创建RenderPass就确定（特别是subpasses使用不同的SRI时）。
 
@@ -103,7 +103,7 @@ static void OnGraphicsDeviceEvent(UnityGfxDeviceEventType eventType)
 ```
 
 在相同目录下创建文件 "RenderAPI_D3D12.h/.cpp" 负责VRS功能的具体实现，通过指针 s_API 进行调用。
-OnDeviceInit 在图形设备被创建后调用，检查当前硬件设备是否支持Pipeline Shading Rate。
+`OnDeviceInit` 在图形设备被创建后调用，通过 "[D3D12_FEATURE_DATA_D3D12_OPTIONS6](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ns-d3d12-d3d12_feature_data_d3d12_options6)" 检查当前硬件设备是否支持Pipeline Shading Rate。
 ```cpp
 // RenderAPI_D3D12.cpp
 #include "RenderAPI_D3D12.h"
@@ -151,7 +151,7 @@ GetRenderEventFunc()
 DX12中 [RSSetShadingRate](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12graphicscommandlist5-rssetshadingrate) 使用 D3D12_SHADING_RATE, D3D12_SHADING_RATE_COMBINER* 作为参数输入, 这里使用将参数编码为一个INT值。 
 其中 "[D3D12_SHADING_RATE](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ne-d3d12-d3d12_shading_rate)" 中最大取值为 “D3D12_SHADING_RATE_4X4 = 0xa”, 使用4个bit来表示。 “[D3D12_SHADING_RATE_COMBINER](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ne-d3d12-d3d12_shading_rate_combiner)” 有DX12中有5种，各占用3个bit。 
 > D3D12_SHADING_RATE 只有 $1\times1, 1\times2, 2\times1, 2\times2, 2\times4, 4\times2, 4\times4,$ 7种，理论最少只需要3个bit，但需要多做一次转换。
-
+> 部分设备可能不支持 $2\times4, 4\times2, 4\times4,$，具体可以通过布尔变量 D3D12_FEATURE_DATA_D3D12_OPTIONS6.AdditionalShadingRatesSupported 进行判断。
 ```cpp
 #define VRS_COMB0_SHIFT   4          
 #define VRS_COMB1_SHIFT   7          
@@ -512,3 +512,88 @@ internal class SetPipelineShadingRatePass : ScriptableRenderPass
 
 但受限于无法修改源码，在URP管线上，我们很难为每一个绘制指令（Drawcall）单独进行Pipeline Shading Rate的设置。 目前URP中提供的接口 `ScriptableRenderContext.DrawRenderers`, `CoammandBuffer.DrawRendererList` 作用更类似于录制一批渲染对象，其后续会通过批处理器生成若干个SRP Batcher（或Drawcall），排序后提交实际的渲染指令到CommandList中。 最理想的情况下，应当是最好能在每个绘制指令提交前设置其对应的pipeline shading rate，但这在不修改源码情况是很难实现的。
 ### NativePlugin 中实现 Attachment Shading Rate
+首先查询当前设备是否支持Attachment Shading Rate。
+通常来说，pipeline shading rate 会被归为Tier 1 的VRS能力。 Attachment shading rate 和 Primitive shading rate 被归为Tier 2的VRS 能力。
+DX12 中通过 [D3D12_VARIABLE_SHADING_RATE_TIER](https://learn.microsoft.com/en-gb/windows/win32/api/d3d12/ne-d3d12-d3d12_variable_shading_rate_tier) 获取 VRS能力的级别。如果取值为 D3D12_VARIABLE_SHADING_RATE_TIER_1 说明仅支持pipeline shading rate。 而取值为 D3D12_VARIABLE_SHADING_RATE_TIER_2 则说明三种能力都支持。
+
+``` h
+// RenderAPI_D3D12.h
+public: 
+    bool IsImageVRSSupported() const { return m_AttachmentVRSSupported; }
+
+private: 
+    bool m_AttachmentVRSSupported = false;
+```
+``` cpp
+// RenderAPI_D3D12.cpp
+void RenderAPI_D3D12::InitializeVRSCapabilities()
+{
+    ID3D12Device* device = m_D3D12 != nullptr ? m_D3D12->GetDevice() : nullptr;
+    if (!device)
+    {
+        m_PipelineVRSSupported = false;
+        m_AttachmentVRSSupported = false;
+        return;
+    }
+
+    D3D12_FEATURE_DATA_D3D12_OPTIONS6 options6 = {};
+    HRESULT hr = device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS6, &options6, sizeof(options6));
+    if (SUCCEEDED(hr))
+    {
+        D3D12_VARIABLE_SHADING_RATE_TIER m_VRSTier = options6.VariableShadingRateTier;
+        m_PipelineVRSSupported = (m_VRSTier >= D3D12_VARIABLE_SHADING_RATE_TIER_1);
+        m_AttachmentVRSSupported    = (m_VRSTier >= D3D12_VARIABLE_SHADING_RATE_TIER_2);
+    }
+    else
+    {
+        m_PipelineVRSSupported = false;
+        m_AttachmentVRSSupported = false;
+    }
+}
+```
+<!-- ``` cpp
+// GfxPluginVRSPlugin.cpp
+extern "C" int UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API
+IsAttachmentVRSSupported()
+{
+    return (s_API && s_API->IsAttachmentVRSSupported()) ? 1 : 0;
+}
+``` -->
+为了生成SRI，还需要知道当前设备使用的“ShadingRateImageTileSize”以确定SRI图的大小。
+> DX12 和 DX11(Nvapi) 的SRI的Tile Size多为定值正方形。 Vulkan, OpenGl ES上的实现则是为XY方向分布提供一个[范围](https://registry.khronos.org/VulkanSC/specs/1.0-extensions/man/html/VkPhysicalDeviceFragmentShadingRatePropertiesKHR.html). 
+> Tile Size通常来说都是二的倍数。
+``` h
+// RenderAPI_D3D12.h
+public: 
+    UINT GetShadingRateImageTileSize() const { return m_ShadingRateImageTileSize; }
+
+private: 
+    UINT m_ShadingRateImageTileSize = 16;
+```
+``` cpp
+// RenderAPI_D3D12.cpp
+void RenderAPI_D3D12::InitializeVRSCapabilities()
+{
+    ID3D12Device* device = m_D3D12 != nullptr ? m_D3D12->GetDevice() : nullptr;
+    if (!device)
+    {
+        m_PipelineVRSSupported = false;
+        m_AttachmentVRSSupported = false;
+        return;
+    }
+
+    D3D12_FEATURE_DATA_D3D12_OPTIONS6 options6 = {};
+    HRESULT hr = device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS6, &options6, sizeof(options6));
+    if (SUCCEEDED(hr))
+    {
+        D3D12_VARIABLE_SHADING_RATE_TIER m_VRSTier = options6.VariableShadingRateTier;
+        m_PipelineVRSSupported = (m_VRSTier >= D3D12_VARIABLE_SHADING_RATE_TIER_1);
+        m_AttachmentVRSSupported    = (m_VRSTier >= D3D12_VARIABLE_SHADING_RATE_TIER_2);
+    }
+    else
+    {
+        m_PipelineVRSSupported = false;
+        m_AttachmentVRSSupported = false;
+    }
+}
+```
