@@ -597,3 +597,205 @@ void RenderAPI_D3D12::InitializeVRSCapabilities()
     }
 }
 ```
+
+DX12 通过 RSSetShadingRateImage 设置SRI 图到渲染状态中。 由于NativePlugin接口不提供接管RT的 D3D12_RESOURCE_BARRIER 的能力， 而SRI在设置前需要将 D3D12_RESOURCE_BARRIER 切换到 D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE。 因此需要在 NativePlguin中创建SRI图并手动进行管理。 
+在Native实现创建SRI的函数`CreateShadingRateImage`，width/height 根据Render Target决定，需要从C#侧经由 `SetShadingRateImageSize` 传入。 SRI的格式可以参考[官方文档](https://learn.microsoft.com/en-us/windows/win32/direct3d12/vrs#format-layout-resource-properties)
+``` h
+// RenderAPI_D3D12.h
+class RenderAPI_D3D12
+{
+private:
+
+    // SRI related parameters.
+    ID3D12Resource* m_SriResource = nullptr; // SRI 图
+    D3D12_RESOURCE_STATES m_SRIState = D3D12_RESOURCE_STATE_COMMON;
+    int m_SriWidth = 0;
+    int m_SriHeight = 0;
+
+    void CreateShadingRateImage(int width, int height);
+    void ReleaseShadingRateImage();
+};
+```
+``` cpp
+// RenderAPI_D3D12.cpp
+bool RenderAPI_D3D12::SetShadingRateImageSize(int width, int height)
+{
+    if (!m_ImageVRSSupported)
+    {
+        VRSLog("[VRS] SetShadingRateImageSize: Image VRS not supported\n");
+        return false;
+    }
+    if (m_SriResource && m_SriWidth == width && m_SriHeight == height)
+        return true;   // 尺寸未变，复用
+    CreateShadingRateImage(width, height);
+    VRSLog("[VRS] SetShadingRateImageSize(%d,%d) -> sri=%p\n", width, height, m_SriResource);
+    return m_SriResource != nullptr;
+}
+
+void RenderAPI_D3D12::CreateShadingRateImage(int width, int height)
+{
+    ID3D12Device* device = m_D3D12 ? m_D3D12->GetDevice() : nullptr;
+    if (!device)
+    {
+        VRSLog("[VRS] CreateShadingRateImage: null device\n");
+        return;
+    }
+
+    ReleaseShadingRateImage();
+
+    // 1) SRI 纹理：R8_UINT + ALLOW_UNORDERED_ACCESS，初始 UNORDERED_ACCESS
+    D3D12_HEAP_PROPERTIES heapProps = {};
+    heapProps.Type = D3D12_HEAP_TYPE_DEFAULT; // GPU-local
+
+    D3D12_RESOURCE_DESC desc = {};
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    desc.Width = width;
+    desc.Height = height;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels = 1;
+    desc.Format = DXGI_FORMAT_R8_UINT;
+    desc.SampleDesc.Count = 1;
+
+    HRESULT hr = device->CreateCommittedResource(
+        &heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+        D3D12_RESOURCE_STATE_COMMON, nullptr,
+        IID_PPV_ARGS(&m_SriResource));
+    if (FAILED(hr) || !m_SriResource)
+    {
+        VRSLog("[VRS] CreateShadingRateImage failed hr=0x%08X\n", (unsigned)hr);
+        return;
+    }
+
+    m_SRIState = D3D12_RESOURCE_STATE_COMMON;   // 记录SRI的状态
+}
+
+void RenderAPI_D3D12::ReleaseShadingRateImage()
+{
+    SAFE_RELEASE(m_SriResource);
+    m_SriWidth = 0;
+    m_SriHeight = 0;
+    m_SRIState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+}
+
+void RenderAPI_D3D12::OnDeviceShutdown()
+{
+    ReleaseShadingRateImage();
+    m_D3D12 = nullptr;
+}
+```
+先尝试将SRI设置到渲染管线上。`SetShadingRateImage` 这里先将SRI的D3D12_RESOURCE_BARRIER 设置为 D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE，然后调用RSSetShadingRateImage进行设置。
+> 为了使Attachment Shading Rate能生效，combinersOp1 不能设置为 Passthrough.
+``` h
+// RenderAPI_D3D12.h
+class RenderAPI_D3D12
+{
+private:
+    bool SetShadingRateImage(int width, int height);
+    bool ClearShadingRateImage();
+};
+```
+```cpp
+// RenderAPI_D3D12.cpp
+bool RenderAPI_D3D12::SetShadingRateImage()
+{
+    if (!m_ImageVRSSupported || !m_SriResource || !m_SriSource)
+    {
+        VRSLog("[VRS] SetShadingRateImage: not supported or source missing (sri=%p source=%p)\n",
+            m_SriResource, m_SriSource);
+        return false;
+    }
+
+    UnityGraphicsD3D12RecordingState recordingState;
+    if (!m_D3D12->CommandRecordingState(&recordingState))
+    {
+        VRSLog("[VRS] SetShadingRateImage: CommandRecordingState returned false\n");
+        return false;
+    }
+
+    ID3D12GraphicsCommandList5* cmd5 = nullptr;
+    HRESULT hr = recordingState.commandList->QueryInterface(
+        IID_PPV_ARGS(&cmd5));
+    if (FAILED(hr) || !cmd5)
+    {
+        OutputDebugStringA("[VRS] SetShadingRateImage: QueryInterface for ID3D12GraphicsCommandList5 failed\n");
+        return false;
+    }
+
+    // SRI barrier 需要设置为 D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE.
+    if (m_SRIState != D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE)
+    {
+        D3D12_RESOURCE_BARRIER transitionBarrier = {};
+        transitionBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        transitionBarrier.Transition.pResource = m_SriResource;
+        transitionBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        transitionBarrier.Transition.StateBefore = m_SRIState;
+        transitionBarrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE;
+        cmd5->ResourceBarrier(1, &transitionBarrier);
+        m_SRIState = D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE;
+    }
+
+    cmd5->RSSetShadingRateImage(m_SriResource);
+    cmd5->Release();
+
+    VRSLog("[VRS] SetShadingRateImage: sri=%p source=%p cmdList=%p copy=(%dx%d)\n",
+        m_SriResource, m_SriSource, recordingState.commandList, m_SriWidth, m_SriHeight);
+    return true;
+}
+
+bool RenderAPI_D3D12::ClearShadingRateImage()
+{
+    if (!m_ImageVRSSupported || !m_SriResource)
+    {
+        OutputDebugStringA("[VRS] ClearShadingRateImage: Image VRS not supported or SRI not created\n");
+        return false;
+    }
+
+    UnityGraphicsD3D12RecordingState recordingState;
+    if (!m_D3D12->CommandRecordingState(&recordingState))
+    {
+        OutputDebugStringA("[VRS] ClearShadingRateImage: CommandRecordingState returned false\n");
+        return false;
+    }
+
+    // 统一使用 cmd5，所有操作都用它。
+    ID3D12GraphicsCommandList5* cmd5 = nullptr;
+    HRESULT hr = recordingState.commandList->QueryInterface(
+        IID_PPV_ARGS(&cmd5));
+    if (FAILED(hr) || !cmd5)
+    {
+        OutputDebugStringA("[VRS] ClearShadingRateImage: QueryInterface for ID3D12GraphicsCommandList5 failed\n");
+        return false;
+    }
+
+    // 解除 SRI 绑定
+    cmd5->RSSetShadingRateImage(nullptr);
+
+    // 恢复 combiner 为 PASSTHROUGH，避免影响后续渲染
+    D3D12_SHADING_RATE_COMBINER combiners[2] = {
+        D3D12_SHADING_RATE_COMBINER_PASSTHROUGH,
+        D3D12_SHADING_RATE_COMBINER_PASSTHROUGH
+    };
+    cmd5->RSSetShadingRate(D3D12_SHADING_RATE_1X1, combiners);
+
+    // 解除绑定后，把 SRI 资源状态切回 COPY_DEST，供下次填充。
+    if (m_SRIState == D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE)
+    {
+        D3D12_RESOURCE_BARRIER barrier = {};
+        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        barrier.Transition.pResource = m_SriResource;
+        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE;
+        barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_COMMON;
+        cmd5->ResourceBarrier(1, &barrier);
+        m_SRIState = D3D12_RESOURCE_STATE_COMMON;
+    }
+
+    cmd5->Release();
+
+    OutputDebugStringA("[VRS] ClearShadingRateImage: RSSet(nullptr) + combiner restore + transition back to COPY_DEST\n");
+    return true;
+}
+```
+
+
+> 这个方法不适合多线程渲染。
