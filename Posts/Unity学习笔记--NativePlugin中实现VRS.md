@@ -4,7 +4,7 @@
 本文主要通过NativePlugin + RenderFeature的方式尝试在DX12中实现VRS功能。 Unity版本：2022.3.62f3.
 
 ## 前言:
-最近看了不是用NativePlugin来给Unity添加一些渲染特性的文章，加上前阵子给公司项目在Unity2022上做了VRS的功能支持。所以想着说能不能不修改引擎，就靠NativePlguin来实现VRS。 但实际在DX12做下来看的，如果不改源码的话，感觉只能做个技术展示，进不了实际生产中。 这里我就借着这次尝试，简单介绍下VRS和NativePlugin吧。 另外也权当抛砖引玉，看看下面提到的问题，大佬们有什么合适的法子。
+最近看了些用NativePlugin来给Unity添加一些渲染特性的文章，加上前阵子给公司项目在Unity2022上做了VRS的功能支持。所以想着说能不能不修改引擎，就靠NativePlguin来实现VRS。 但实际在DX12做下来看的，如果不改源码的话，感觉只能做个技术展示，进不了实际生产中。 这里我就借着这次尝试，简单介绍下VRS和NativePlugin吧。 另外也权当抛砖引玉，看看下面提到的问题，大佬们有什么合适的法子。
 
 ## VRS (Variable shading rate, 可变速率着色)
 在开始实际代码之前，先简单介绍下VRS。 简单来说，VRS允许开发者控制片元着色器的调用频率，减少不必要的着色计算。在我看来，VRS的特点是解耦了光栅化和着色计算这两个影响了渲染压力的主要因素。 以图为例
@@ -515,7 +515,6 @@ internal class SetPipelineShadingRatePass : ScriptableRenderPass
 首先查询当前设备是否支持Attachment Shading Rate。
 通常来说，pipeline shading rate 会被归为Tier 1 的VRS能力。 Attachment shading rate 和 Primitive shading rate 被归为Tier 2的VRS 能力。
 DX12 中通过 [D3D12_VARIABLE_SHADING_RATE_TIER](https://learn.microsoft.com/en-gb/windows/win32/api/d3d12/ne-d3d12-d3d12_variable_shading_rate_tier) 获取 VRS能力的级别。如果取值为 D3D12_VARIABLE_SHADING_RATE_TIER_1 说明仅支持pipeline shading rate。 而取值为 D3D12_VARIABLE_SHADING_RATE_TIER_2 则说明三种能力都支持。
-
 ``` h
 // RenderAPI_D3D12.h
 public: 
@@ -598,8 +597,50 @@ void RenderAPI_D3D12::InitializeVRSCapabilities()
 }
 ```
 
-DX12 通过 RSSetShadingRateImage 设置SRI 图到渲染状态中。 由于NativePlugin接口不提供接管RT的 D3D12_RESOURCE_BARRIER 的能力， 而SRI在设置前需要将 D3D12_RESOURCE_BARRIER 切换到 D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE。 因此需要在 NativePlguin中创建SRI图并手动进行管理。 
-在Native实现创建SRI的函数`CreateShadingRateImage`，width/height 根据Render Target决定，需要从C#侧经由 `SetShadingRateImageSize` 传入。 SRI的格式可以参考[官方文档](https://learn.microsoft.com/en-us/windows/win32/direct3d12/vrs#format-layout-resource-properties)
+<!-- DX12 通过 RSSetShadingRateImage 设置SRI 图到渲染状态中。 由于NativePlugin接口不提供接管RT的 D3D12_RESOURCE_BARRIER 的能力， 而SRI在设置前需要将 D3D12_RESOURCE_BARRIER 切换到 D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE。 为避免SRI的 D3D12_RESOURCE_BARRIER (在NativePlugin中被修改后) 与Unity底层维护的状态发生冲突，需要在 NativePlguin中创建SRI图并手动进行管理。 -->
+
+DX12 通过 `RSSetShadingRateImage` 设置SRI 图到渲染状态中。 这里在NativePlugin里创建SRI图并设置在管线中。
+> 为什么不在Unity中创建RT然后传到NativePlugin中使用: Unity （DX12上）创建RT默认为Typeless(DXGI_FORMAT_R8_TYPELESS)格式，后续再通过视图描述符(D3D12_*_VIEW_DESC)指定RT的具体格式。 而函数 [RSSetShadingRateImage](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12graphicscommandlist5-rssetshadingrateimage#parameters) 硬性要求SRI的格式为 DXGI_FORMAT_R8_UINT 。 这里没法在调用 `RSSetShadingRateImage` 时指定SRI的格式解释为 DXGI_FORMAT_R8_UINT，所以要求SRI图在NativePlugin创建，管理。
+
+SRI的尺寸是根据Render Target 和 TileSize 共同决定的。 在C#侧获取Render Target的尺寸，通过 `SetRenderTargetSize` 传入Native侧，记录在变量 `m_SriWidth`/`m_SriHeight` 上。 将RenderTarget尺寸除以TileSize后向上取整，得到SRI图的尺寸(Tile 数量)。
+``` C#
+// NativePluginBridge.cs
+public static class NativePluginBridge
+{
+    [DllImport(PluginName, EntryPoint = "SetRenderTargetSize")]
+    private static extern void SetRenderTargetSizeNative(int width, int height);
+
+    public static void SetRenderTargetSizeSize(int width, int height)
+    {
+        SetRenderTargetSizeNative(width, height);
+    }
+}
+```
+``` h
+// RenderAPI_D3D12.h
+class RenderAPI_D3D12
+{
+public:
+    bool SetShadingRateImageSize(int width, int height);
+};
+```
+``` cpp
+bool RenderAPI_D3D12::SetRenderTargetSize(int width, int height)
+{
+    if (!m_AttachmentVRSSupported)
+        return false;
+
+    if (m_SriResource && m_RenderTargetWidth == width && m_RenderTargetHeight == height)
+        return true;   // 尺寸未变，复用
+               
+    int sriWidth  = (width  + (int)m_ShadingRateImageTileSize - 1) / (int)m_ShadingRateImageTileSize;
+    int sriHeight = (height + (int)m_ShadingRateImageTileSize - 1) / (int)m_ShadingRateImageTileSize;
+    CreateShadingRateImage(sriWidth, sriHeight);
+    return m_SriResource != nullptr;
+}
+```
+
+在NativePlugin侧实现创建SRI的函数`CreateShadingRateImage`，width/height 根据Render Target决定，需要从C#侧经由 `SetShadingRateImageSize` 传入。 SRI的格式可以参考[官方文档](https://learn.microsoft.com/en-us/windows/win32/direct3d12/vrs#format-layout-resource-properties)
 ``` h
 // RenderAPI_D3D12.h
 class RenderAPI_D3D12
@@ -618,20 +659,6 @@ private:
 ```
 ``` cpp
 // RenderAPI_D3D12.cpp
-bool RenderAPI_D3D12::SetShadingRateImageSize(int width, int height)
-{
-    if (!m_ImageVRSSupported)
-    {
-        VRSLog("[VRS] SetShadingRateImageSize: Image VRS not supported\n");
-        return false;
-    }
-    if (m_SriResource && m_SriWidth == width && m_SriHeight == height)
-        return true;   // 尺寸未变，复用
-    CreateShadingRateImage(width, height);
-    VRSLog("[VRS] SetShadingRateImageSize(%d,%d) -> sri=%p\n", width, height, m_SriResource);
-    return m_SriResource != nullptr;
-}
-
 void RenderAPI_D3D12::CreateShadingRateImage(int width, int height)
 {
     ID3D12Device* device = m_D3D12 ? m_D3D12->GetDevice() : nullptr;
@@ -683,7 +710,8 @@ void RenderAPI_D3D12::OnDeviceShutdown()
     m_D3D12 = nullptr;
 }
 ```
-先尝试将SRI设置到渲染管线上。`SetShadingRateImage` 这里先将SRI的D3D12_RESOURCE_BARRIER 设置为 D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE，然后调用RSSetShadingRateImage进行设置。
+
+`SetShadingRateImage` 中先将SRI的D3D12_RESOURCE_BARRIER 设置为 D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE，然后调用RSSetShadingRateImage进行设置。
 > 为了使Attachment Shading Rate能生效，combinersOp1 不能设置为 Passthrough.
 ``` h
 // RenderAPI_D3D12.h
@@ -797,5 +825,87 @@ bool RenderAPI_D3D12::ClearShadingRateImage()
 }
 ```
 
+添加`SetShadingRateImage` 和 `ClearShadingRateImage` 的序号对应的eventID，在 `VRSRenderFeature` 中调用。 
+``` cpp
+// GfxPluginVRSPlugin.cpp
+#define SetAttachmentShadingRate_EVENT_ID         1 //设置 attachment shaidng rate 的渲染事件ID
+#define ResetAttachmentShadingRate_EVENT_ID         2 //清楚 attachment shaidng rate 的渲染事件ID
 
-> 这个方法不适合多线程渲染。
+static void OnGraphicsDeviceEvent(UnityGfxDeviceEventType eventType)
+{
+    //...
+    s_D3D12->ConfigureEvent(SetAttachmentShadingRate_EVENT_ID, &vrsCfg);
+    s_D3D12->ConfigureEvent(ResetAttachmentShadingRate_EVENT_ID, &vrsCfg);
+    //...
+}
+
+static void UNITY_INTERFACE_API OnRenderEventData(int eventID, void* data)
+{
+    if (s_API == nullptr) return;
+
+    switch (eventID)
+    {
+        case PipelineShadingRate_EVENT_ID:
+        {
+            int p = (int)(intptr_t)data;
+            D3D12_SHADING_RATE rate = (D3D12_SHADING_RATE)(p & VRS_RATE_MASK);
+            D3D12_SHADING_RATE_COMBINER c0 = (D3D12_SHADING_RATE_COMBINER)((p >> VRS_COMB0_SHIFT) & VRS_COMB0_MASK);
+            D3D12_SHADING_RATE_COMBINER c1 = (D3D12_SHADING_RATE_COMBINER)((p >> VRS_COMB1_SHIFT) & VRS_COMB1_MASK);
+            s_API->SetPipelineShadingRate(rate, c0, c1);
+            break;
+        }
+        case SetAttachmentShadingRate_EVENT_ID:
+        {
+            s_API->SetShadingRateImage();
+            break;
+        }
+        case ResetAttachmentShadingRate_EVENT_ID:
+        {
+            s_API->ClearShadingRateImage();
+            break;
+        }
+    default:
+        break;
+    }
+}
+```
+``` C#
+// NativePluginBridge.cs
+public static class NativePluginBridge
+{
+    //..
+    public const int SetAttachmentShadingRate_EVENT_ID = 1;
+    public const int ResetAttachmentShadingRate_EVENT_ID = 2;
+    //..
+}
+```
+``` C#
+// VRSRenderFeature.cs.cs
+public static class NativePluginBridge
+{
+    //..
+    public const int SetAttachmentShadingRate_EVENT_ID = 1;
+    public const int ResetAttachmentShadingRate_EVENT_ID = 2;
+    //..
+}
+```
+
+
+使用Renderdoc 截帧，可以看到Attachment Shading Rate已经在管线中生效。
+
+一般来说，实际项目中多根据渲染画面的亮度梯度控制画面着色频率的分布。 大致思路是: 在帧末尾计算画面各个区域(Tile)的亮度梯度，与设置的阈值进行比较, 得到各个区域的着色频率，记录在SRI图上。下一帧绘制场景前，将SRI图进行重投影并设置在管线上。
+首先修改`VRSRenderFeature`，在 inspector 上添加用于比较梯度的阈值。
+
+在UberPost阶段计算Quad上的梯度，写入一张R32_UINT纹理中。
+> 如果考虑兼容的角度，这里使用一个compute shader来计算梯度可能合适。
+> 这里的做法参考了移动版《三角洲行动》的分享中的做法。
+>  推测是高通版本的Wave intrinsic 实现？ 我这没找到对应的文档。
+
+因为需要在绘制场景前进行重投影，这里要求开启Predepth 并修改 Motion Vecotor相关的逻辑。
+这里参考Predepth中计算Depth的方式，添加 
+
+> 当RenderTarget无法被Tile Size整除时，靠近X/Y = 1的Tile可能出现Shading Point (SV_Position) 大于等于1的情况。 如果使用Texture.load读取SV_Position坐标上的纹理数据数据可能导致问题（返回0）。
+
+## 缺陷:
+以上介绍的方法只适合单线程渲染。因为开启多线程渲染后，URP中提交渲染指令的接口 与 commandline 的提交不在一个提交线程中。因而导致渲染线程生效前会重置渲染状态，二者不在一个CommandList中，导致VRS不生效。
+此外Primitive Shading Rate 尝试写了下，
