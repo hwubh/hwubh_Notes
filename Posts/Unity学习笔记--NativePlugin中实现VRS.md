@@ -616,6 +616,14 @@ public static class NativePluginBridge
     }
 }
 ```
+``` cpp
+// GfxPluginVRSPlugin.cpp.cpp
+extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API
+SetRenderTargetSize(int width, int height)
+{
+    if (s_API) s_API->SetRenderTargetSize(width, height);
+}
+```
 ``` h
 // RenderAPI_D3D12.h
 class RenderAPI_D3D12
@@ -625,6 +633,7 @@ public:
 };
 ```
 ``` cpp
+// RenderAPI_D3D12.cpp
 bool RenderAPI_D3D12::SetRenderTargetSize(int width, int height)
 {
     if (!m_AttachmentVRSSupported)
@@ -880,18 +889,115 @@ public static class NativePluginBridge
 }
 ```
 ``` C#
-// VRSRenderFeature.cs.cs
-public static class NativePluginBridge
+// VRSRenderFeature.cs
+[System.Serializable]
+public class Settings
 {
-    //..
-    public const int SetAttachmentShadingRate_EVENT_ID = 1;
-    public const int ResetAttachmentShadingRate_EVENT_ID = 2;
-    //..
+    // ..原有 Pipeline 设置..
+    // Settings 中添加 Attachment Shading Rate 的两个插入点，规定 SRI 的生效范围
+    [Header("Attachment Shading Rate (SRI)")]
+    public bool enableAttachmentVRS = true;
+    [Tooltip("在哪里绑定 SRI（attachment shading rate 生效起点）")]
+    public RenderPassEvent setShadingRateImageInjectPoint = RenderPassEvent.BeforeRenderingOpaques;
+    [Tooltip("在哪里解除 SRI（attachment shading rate 生效终点）")]
+    public RenderPassEvent resetShadingRateImageInjectPoint = RenderPassEvent.BeforeRenderingPostProcessing;
+}
+
+// Create 中创建两个 Pass，插入点由 Settings 指定
+private SetShadingRateImagePass m_SetShadingRateImagePass;
+private ResetShadingRateImagePass m_ResetShadingRateImagePass;
+
+public override void Create()
+{
+    // ..原有 SetPipelineShadingRatePass 的创建..
+
+    m_SetShadingRateImagePass = new SetShadingRateImagePass();
+    m_SetShadingRateImagePass.renderPassEvent = settings.setShadingRateImageInjectPoint;
+
+    m_ResetShadingRateImagePass = new ResetShadingRateImagePass();
+    m_ResetShadingRateImagePass.renderPassEvent = settings.resetShadingRateImageInjectPoint;
+}
+
+// AddRenderPasses 中插入两个 Pass（与 Pipeline 设置相互独立，不按模式分发）
+public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
+{
+    if (renderingData.cameraData.cameraType != CameraType.Game)
+        return;
+
+    // ..原有 Pipeline Shading Rate 的入队逻辑..
+
+    if (settings.enableAttachmentVRS)
+    {
+        // 保证 reset 晚于 set，否则 SRI 的生效范围为空
+        if (m_ResetShadingRateImagePass.renderPassEvent <= m_SetShadingRateImagePass.renderPassEvent)
+            m_ResetShadingRateImagePass.renderPassEvent = m_SetShadingRateImagePass.renderPassEvent;
+
+        renderer.EnqueuePass(m_SetShadingRateImagePass);
+        renderer.EnqueuePass(m_ResetShadingRateImagePass);
+    }
+}
+
+// 绑定 SRI 的 Pass（生效起点）：先同步 RenderTarget 尺寸给 Native 侧创建 SRI，再发出绑定事件
+internal class SetShadingRateImagePass : ScriptableRenderPass
+{
+    public SetShadingRateImagePass()
+    {
+        profilingSampler = new ProfilingSampler(nameof(SetShadingRateImagePass));
+    }
+
+    public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
+    {
+        var ptr = NativePluginBridge.RenderEventAndData;
+        if (ptr == System.IntPtr.Zero)
+            return;
+
+        // SRI 尺寸由 RenderTarget 和 TileSize 决定，绑定前先同步给 Native 侧
+        var desc = renderingData.cameraData.cameraTargetDescriptor;
+        NativePluginBridge.SetRenderTargetSizeSize(desc.width, desc.height);
+
+        var cmd = CommandBufferPool.Get("SetShadingRateImage");
+        if (cmd == null)
+            return;
+
+        // attachment 事件不携带参数，data 传 IntPtr.Zero
+        cmd.IssuePluginEventAndData(
+            ptr, NativePluginBridge.SetAttachmentShadingRate_EVENT_ID, System.IntPtr.Zero);
+
+        context.ExecuteCommandBuffer(cmd);
+        CommandBufferPool.Release(cmd);
+    }
+}
+
+// 解除 SRI 的 Pass（生效终点）
+internal class ResetShadingRateImagePass : ScriptableRenderPass
+{
+    public ResetShadingRateImagePass()
+    {
+        profilingSampler = new ProfilingSampler(nameof(ResetShadingRateImagePass));
+    }
+
+    public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
+    {
+        var ptr = NativePluginBridge.RenderEventAndData;
+        if (ptr == System.IntPtr.Zero)
+            return;
+
+        var cmd = CommandBufferPool.Get("ResetShadingRateImage");
+        if (cmd == null)
+            return;
+
+        cmd.IssuePluginEventAndData(
+            ptr, NativePluginBridge.ResetAttachmentShadingRate_EVENT_ID, System.IntPtr.Zero);
+
+        context.ExecuteCommandBuffer(cmd);
+        CommandBufferPool.Release(cmd);
+    }
 }
 ```
-
+![20260831183410](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260831183410.png)
 
 使用Renderdoc 截帧，可以看到Attachment Shading Rate已经在管线中生效。
+![20260831183347](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260831183347.png)
 
 一般来说，实际项目中多根据渲染画面的亮度梯度控制画面着色频率的分布。 大致思路是: 在帧末尾计算画面各个区域(Tile)的亮度梯度，与设置的阈值进行比较, 得到各个区域的着色频率，记录在SRI图上。下一帧绘制场景前，将SRI图进行重投影并设置在管线上。
 首先修改`VRSRenderFeature`，在 inspector 上添加用于比较梯度的阈值。
