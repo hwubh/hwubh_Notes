@@ -602,26 +602,71 @@ void RenderAPI_D3D12::InitializeVRSCapabilities()
 DX12 通过 `RSSetShadingRateImage` 设置SRI 图到渲染状态中。 这里在NativePlugin里创建SRI图并设置在管线中。
 > 为什么不在Unity中创建RT然后传到NativePlugin中使用: Unity （DX12上）创建RT默认为Typeless(DXGI_FORMAT_R8_TYPELESS)格式，后续再通过视图描述符(D3D12_*_VIEW_DESC)指定RT的具体格式。 而函数 [RSSetShadingRateImage](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12graphicscommandlist5-rssetshadingrateimage#parameters) 硬性要求SRI的格式为 DXGI_FORMAT_R8_UINT 。 这里没法在调用 `RSSetShadingRateImage` 时指定SRI的格式解释为 DXGI_FORMAT_R8_UINT，所以要求SRI图在NativePlugin创建，管理。
 
-SRI的尺寸是根据Render Target 和 TileSize 共同决定的。 在C#侧获取Render Target的尺寸，通过 `SetRenderTargetSize` 传入Native侧，记录在变量 `m_SriWidth`/`m_SriHeight` 上。 将RenderTarget尺寸除以TileSize后向上取整，得到SRI图的尺寸(Tile 数量)。
+SRI的尺寸是根据Render Target 和 TileSize 共同决定的。 
+C#侧通过导出的函数 得到TileSize。
 ``` C#
 // NativePluginBridge.cs
 public static class NativePluginBridge
 {
-    [DllImport(PluginName, EntryPoint = "SetRenderTargetSize")]
-    private static extern void SetRenderTargetSizeNative(int width, int height);
+    [DllImport(PluginName)]
+    private static extern int GetShadingRateImageTileSize();
 
-    public static void SetRenderTargetSizeSize(int width, int height)
+    public static int GetShadingRateImageTileSizeQuery()
     {
-        SetRenderTargetSizeNative(width, height);
+        return GetShadingRateImageTileSize();
+    }
+}
+```
+``` cpp
+// GfxPluginVRSPlugin.cpp.cpp
+extern "C" int UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API
+GetShadingRateImageTileSize()
+{
+    return s_API ? static_cast<int>(s_API->GetShadingRateImageTileSize()) : 16;
+}
+```
+``` h
+// RenderAPI_D3D12.h
+class RenderAPI_D3D12
+{
+public:
+    UINT GetShadingRateImageTileSize() const { return m_ShadingRateImageTileSize; }
+};
+```
+将RenderTarget尺寸除以TileSize后向上取整，得到SRI图的尺寸(Tile 数量)
+``` C#
+// NativePluginBridge.cs
+public static class NativePluginBridge
+{
+    // SetShadingRateImagePass 的 Execute函数中
+    var desc = renderingData.cameraData.cameraTargetDescriptor;
+    int tileSize = NativePluginBridge.GetShadingRateImageTileSizeQuery();
+    int sriWith = Mathf.CeilToInt(desc.width  / (float)tileSize);
+    int sriHeight = Mathf.CeilToInt(desc.height / (float)tileSize);
+    NativePluginBridge.SetShadingRateImageSize(sriWith, sriHeight);
+    //...
+}
+```
+计算得到SRI的尺寸后，通过通过 `SetShadingRateImageSize` 传入Native侧，记录在变量 `m_SriWidth`/`m_SriHeight` 上。
+``` C#
+// NativePluginBridge.cs
+public static class NativePluginBridge
+{
+    [DllImport(PluginName, EntryPoint = "SetShadingRateImageSize")]
+    private static extern void SetShadingRateImageSize(int width, int height);
+
+    public static void SetShadingRateImageSize(int width, int height)
+    {
+        SetShadingRateImageSize(width, height);
     }
 }
 ```
 ``` cpp
 // GfxPluginVRSPlugin.cpp.cpp
 extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API
-SetRenderTargetSize(int width, int height)
+SetShadingRateImageSize(int width, int height)
 {
-    if (s_API) s_API->SetRenderTargetSize(width, height);
+    if (s_API) s_API->SetShadingRateImageSize(width, height);
 }
 ```
 ``` h
@@ -634,22 +679,20 @@ public:
 ```
 ``` cpp
 // RenderAPI_D3D12.cpp
-bool RenderAPI_D3D12::SetRenderTargetSize(int width, int height)
+bool RenderAPI_D3D12::SetShadingRateImageSize(int width, int height)
 {
     if (!m_AttachmentVRSSupported)
         return false;
 
-    if (m_SriResource && m_RenderTargetWidth == width && m_RenderTargetHeight == height)
+    if (m_SriResource && m_SriWidth == width && m_SriHeight == height)
         return true;   // 尺寸未变，复用
-               
-    int sriWidth  = (width  + (int)m_ShadingRateImageTileSize - 1) / (int)m_ShadingRateImageTileSize;
-    int sriHeight = (height + (int)m_ShadingRateImageTileSize - 1) / (int)m_ShadingRateImageTileSize;
+            
     CreateShadingRateImage(sriWidth, sriHeight);
     return m_SriResource != nullptr;
 }
 ```
 
-在NativePlugin侧实现创建SRI的函数`CreateShadingRateImage`，width/height 根据Render Target决定，需要从C#侧经由 `SetShadingRateImageSize` 传入。 SRI的格式可以参考[官方文档](https://learn.microsoft.com/en-us/windows/win32/direct3d12/vrs#format-layout-resource-properties)
+在NativePlugin侧实现创建SRI的函数`CreateShadingRateImage`。 SRI的格式可以参考[官方文档](https://learn.microsoft.com/en-us/windows/win32/direct3d12/vrs#format-layout-resource-properties)
 ``` h
 // RenderAPI_D3D12.h
 class RenderAPI_D3D12
@@ -953,7 +996,7 @@ internal class SetShadingRateImagePass : ScriptableRenderPass
 
         // SRI 尺寸由 RenderTarget 和 TileSize 决定，绑定前先同步给 Native 侧
         var desc = renderingData.cameraData.cameraTargetDescriptor;
-        NativePluginBridge.SetRenderTargetSizeSize(desc.width, desc.height);
+        NativePluginBridge.SetShadingRateImageSize(desc.width, desc.height);
 
         var cmd = CommandBufferPool.Get("SetShadingRateImage");
         if (cmd == null)
@@ -1000,17 +1043,386 @@ internal class ResetShadingRateImagePass : ScriptableRenderPass
 ![20260831183347](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260831183347.png)
 
 一般来说，实际项目中多根据渲染画面的亮度梯度控制画面着色频率的分布。 大致思路是: 在帧末尾计算画面各个区域(Tile)的亮度梯度，与设置的阈值进行比较, 得到各个区域的着色频率，记录在SRI图上。下一帧绘制场景前，将SRI图进行重投影并设置在管线上。
-首先修改`VRSRenderFeature`，在 inspector 上添加用于比较梯度的阈值。
+首先修改`VRSRenderFeature`，在 inspector 上添加用于比较梯度的阈值, 和挂载用于计算着色频率用的compute shader "sriComputeShader"
+``` C#
+// VRSRenderFeature.cs
+public class Settings
+{
+    // ... [Header("Attachment Shading Rate (SRI)")]
+    [Range(0f, 1f)] public float x4Threshold = 0.05f;
+    [Range(0f, 1f)] public float x2Threshold = 0.25f;
 
-在UberPost阶段计算Quad上的梯度，写入一张R32_UINT纹理中。
+    public ComputeShader sriComputeShader;
+}
+```
+在后处理阶段使用 wave intrinsic 获取Quad($2\times2$像素块)上的感知亮度，写入一张半分辨率，可随机读写的R32_UINT纹理中。
+``` C#
+// Packages\com.unity.render-pipelines.universal\Runtime\Passes\PostProcessPass.cs
+internal class PostProcessPass : ScriptableRenderPass
+{
+    RTHandle s_LuminanceRT;
+
+    public void Dispose()
+    {
+        //...
+        s_LuminanceRT?.Release();
+    }
+
+    void Render(CommandBuffer cmd, ref RenderingData renderingData)
+    {
+        //...
+        if (cameraData.cameraType == CameraType.Game)
+        {
+            int w = (cameraData.cameraTargetDescriptor.width + 1) / 2;
+            int h = (cameraData.cameraTargetDescriptor.height + 1) / 2;
+            if (s_LuminanceRT == null || s_LuminanceRT.rt.width != w || s_LuminanceRT.rt.height != h)
+            {
+                s_LuminanceRT?.Release();
+                s_LuminanceRT = RTHandles.Alloc(w, h, colorFormat: GraphicsFormat.R32_UInt,
+                                                    enableRandomWrite: true, name: "_LumGradUAV");
+            }
+            m_Materials.uber.EnableKeyword("_VRS_LUMA_OUTPUT");
+            cmd.SetRandomWriteTarget(1, s_LuminanceRT);
+        }
+        // Done with Uber, blit it
+        //...
+        if (cameraData.cameraType == CameraType.Game)
+            cmd.ClearRandomWriteTargets();
+    }
+}
+```
+``` C
+// Packages\com.unity.render-pipelines.universal\Shaders\PostProcessing\UberPost.shader
+#pragma use_dxc
+#pragma require wavebasic quadshuffle
+#pragma multi_compile_local_fragment _ _VRS_LUMA_OUTPUT   // 宏门控：变体二选一，C# 按相机开关
+
+#if _VRS_LUMA_OUTPUT
+RWTexture2D<uint> _LuminanceTex : register(u1);
+
+// 感知亮度：统一到显示信号域 [0,1] 后按 BT.709 加权（γ 编码 ≈ 人眼明度响应，即视频 Y′ luma）
+// 不复用 GetLuminance()：其实现（core Luminance/AcesLuminance，均为 dot）假设线性输入，是光度亮度
+half VRSLuminance(half3 color)
+{
+    #if defined(HDR_ENCODING)
+        // OETF 已在调用点上方应用：color 已是显示编码信号（PQ 码值即感知域，1.0 = MaxNits），直接加权
+        return dot(color, half3(0.2126, 0.7152, 0.0722));
+    #elif defined(_LINEAR_TO_SRGB_CONVERSION) || defined(_GAMMA_20) || defined(UNITY_COLORSPACE_GAMMA)
+        // 已是显示域（sRGB / γ2.0，转换发生在 dithering 之前）：直接加权
+        return dot(color, half3(0.2126, 0.7152, 0.0722));
+    #else
+        // 线性 LDR（uber 非最后一个 pass）：转 sRGB 域再加权，保证暗部感知一致
+        return dot(GetLinearToSRGB(color), half3(0.2126, 0.7152, 0.0722));
+    #endif
+}
+#endif
+
+half4 FragUberPost(Varyings input) : SV_Target
+{
+    //...
+    #if _VRS_LUMA_OUTPUT
+    uint2 ScreenPos = (uint2)input.positionCS.xy;
+
+    half L = VRSLuminance(color);                   // 感知亮度
+
+    // PQM 直取：SM 6.0 quad intrinsics = GetPixelQuadMessage 在 D3D12 的对应物
+    // 取的是"邻居的值"而非梯度（梯度在解码端用 邻值−L 求出，无需 ddx/ddy）；须位于均匀控制流
+    float H = QuadReadAcrossX(L);          // 水平邻亮度（even 像素取 +X，odd 取 −X）
+    float V = QuadReadAcrossY(L);          // 垂直邻亮度
+    float D = QuadReadAcrossDiagonal(L);   // 对角邻亮度
+
+    // quad 摊销：仅左上角像素写半分辨率 UAV（= DF 的 if (x&1)==0 && (y&1)==0）
+    UNITY_BRANCH
+    if (((ScreenPos.x & 1) == 0) && ((ScreenPos.y & 1) == 0))
+    {
+        // GetEncodedUint(L,H,V,D) 移植：四亮度值各 8bit 打包（LDR 域 [0,1] → 0..255）
+        uint qL = (uint)round(saturate(L) * 255.0);
+        uint qH = (uint)round(saturate(H) * 255.0);
+        uint qV = (uint)round(saturate(V) * 255.0);
+        uint qD = (uint)round(saturate(D) * 255.0);
+        _LumGradUAV[ScreenPos >> 1] = qL | (qH << 8) | (qV << 16) | (qD << 24);   // = DF 的 ScreenPos*0.5
+    }
+    #endif
+    //... return half4(color, 1.0);
+}
+```
+> 使用 wave intrinsic 需要 #pragma use_dxc 和 #pragma require wavebasic quadshuffle 来要求shader model 版本。
 > 如果考虑兼容的角度，这里使用一个compute shader来计算梯度可能合适。
-> 这里的做法参考了移动版《三角洲行动》的分享中的做法。
->  推测是高通版本的Wave intrinsic 实现？ 我这没找到对应的文档。
+> 这里的做法参考了[移动版《三角洲行动》分享](https://gdcvault.com/play/1036052/Mobile-Development-Best-Practices-Delta)中的做法。
+> `GetPixelQuadMessage` 推测是高通版本的Wave intrinsic 实现？ 我这没找到对应的文档。
 
-因为需要在绘制场景前进行重投影，这里要求开启Predepth 并修改 Motion Vecotor相关的逻辑。
-这里参考Predepth中计算Depth的方式，添加 
+因为需要在绘制场景前进行SRI图的重投影，这里要求开启Predepth 并修改 Motion Vecotor相关的逻辑， 使Motion Vector 能在OpaquePass之前绘制。
+这里 `requiresDepthTextureEarliestEvent`, 使用 RenderPassEvent 变量 `requiresMotionVectorEarliestEvent` 控制Motion Vector在渲染管线中的生效时机。
+``` C#
+// Packages\com.unity.render-pipelines.universal\Runtime\UniversalRenderer.cs
+private struct RenderPassInputSummary
+{
+    // ...
+    internal RenderPassEvent requiresMotionVectorEarliestEvent;
+}
 
+private RenderPassInputSummary GetRenderPassInputs(ref RenderingData renderingData)
+{
+    // ... inputSummary.requiresDepthTextureEarliestEvent = RenderPassEvent.BeforeRenderingPostProcessing;
+    inputSummary.requiresMotionVectorEarliestEvent = RenderPassEvent.BeforeRenderingPostProcessing;
+
+        //... inputSummary.requiresDepthPrepass |= needsNormals || needsDepth && eventBeforeMainRendering;
+        inputSummary.requiresDepthPrepass |= needsMotion && eventBeforeMainRendering;
+
+        // ... if (needsNormals || needsDepth) inputSummary.requiresDepthNormalAtEvent = (RenderPassEvent)Mathf.Min((int)pass.renderPassEvent, (int)inputSummary.requiresDepthNormalAtEvent);
+        if (needsMotion)
+            inputSummary.requiresMotionVectorEarliestEvent = (RenderPassEvent)Mathf.Min((int)pass.renderPassEvent, (int)inputSummary.requiresMotionVectorEarliestEvent);
+
+        //... inputSummary.requiresDepthTexture = true;
+        if (inputSummary.requiresMotionVectorEarliestEvent < m_MotionVectorPass.renderPassEvent)
+            m_MotionVectorPass.renderPassEvent = (RenderPassEvent)Mathf.Max((int)RenderPassEvent.AfterRenderingPrePasses, (int)inputSummary.requiresMotionVectorEarliestEvent - 1);
+        ///... inputSummary.requiresDepthTextureEarliestEvent = (RenderPassEvent)Mathf.Min((int)m_MotionVectorPass.renderPassEvent, (int)inputSummary.requiresDepthTextureEarliestEvent);
+
+}
+``` 
+
+修改 `SetShadingRateImagePass` pass，使用compute shader "sriComputeShader" 进行SRI图数据的计算和重投影。
+``` c
+// sriComputeShader.compute
+// LuminanceToSRI.compute
+// 输入：上一帧 UberPost 写入的半分辨率亮度图（R32_UInt，每 texel 编码 quad 四亮度 L/H/V/D，各 8bit）
+//       当前帧运动向量纹理 _MotionVectorTexture（URP MV pass 全局 SetGlobalTexture，全分辨率 RG16F）
+// 输出：R8_UInt SRI 源贴图（每 texel = 一个硬件 tile 的 D3D12_SHADING_RATE）
+// 判决：固定阈值三档——err >= _X2Threshold → 1X；err < _X4Threshold → 4X；之间 → 2X
+#pragma kernel ComputeShadingRate
+
+Texture2D<uint>   _LumGrad;    // 半分辨率亮度图（编码：L | H<<8 | V<<16 | D<<24）
+Texture2D<float2> _MotionVectorTexture;  // 全分辨率 MV（URP 全局 SetGlobalTexture，无需 SetComputeTextureParam）
+RWTexture2D<uint> _SriOut;     // R8_UInt 源贴图（native 拷贝到 SRI）
+int2  _LumSize;                // 半分辨率尺寸
+int   _TileTexels;             // 每 tile 边长的半分辨率 texel 数 = tileSize/2（NVIDIA=8，Intel=4）
+float _X4Threshold;            // 低于此误差 → 4X（最激进降档）
+float _X2Threshold;            // 高于此误差 → 1X（不降档）；两阈值之间 → 2X
+
+// 单 texel 贡献：解码亮度 + 方向梯度（quad 内 |H−L|/|V−L| 与跨 quad 边界 max）
+// 对应 PPT "2x2[2x2]" 两级判定：quad 内差异 + 跨 quad 边界边缘
+//
+// 重投影：用当前帧 MV 把采样位置偏回帧 N-1 梯度图的对应位置，消除相机运动几何错位。
+// MV 约定 = curUV − prevUV（UV 域前向位移）；半分辨率 texel p 对应全分辨率 p*2，
+// MV 采样后 ×_LumSize 转为半分辨率像素偏移；越界 clamp 到梯度图边缘。
+// MV 不参与 rate 计算（无 vH/vQ 速度修正），仅用于采样坐标偏移。
+void TexelContribution(int2 p, out float errX, out float errY)
+{
+    errX = 0; errY = 0;
+    if (p.x >= _LumSize.x || p.y >= _LumSize.y)
+        return;
+
+    // 重投影：采样当前帧 MV → 偏回帧 N-1 位置 → clamp 到梯度图边缘
+    float2 mv = _MotionVectorTexture.Load(int3(p * 2, 0)).rg;
+    int2 pr = clamp(p - int2(round(mv * _LumSize)), int2(0, 0), _LumSize - 1);
+
+    uint e = _LumGrad[pr];
+    float luma = (e & 0xFF) * (1.0 / 255.0);
+
+    // quad 内差分（|H−L|、|V−L|）
+    errX = abs((((e >> 8)  & 0xFF) - (e & 0xFF)) * (1.0 / 255.0));
+    errY = abs((((e >> 16) & 0xFF) - (e & 0xFF)) * (1.0 / 255.0));
+
+    // 跨 quad 边界：邻接 texel 用 pr 偏移位置采样（MV 空间平滑，近似有效）
+    if (pr.x + 1 < _LumSize.x)
+        errX = max(errX, abs(luma - (_LumGrad[pr + int2(1, 0)] & 0xFF) * (1.0 / 255.0)));
+    if (pr.y + 1 < _LumSize.y)
+        errY = max(errY, abs(luma - (_LumGrad[pr + int2(0, 1)] & 0xFF) * (1.0 / 255.0)));
+}
+
+// 固定阈值判决：X/Y 轴独立三档
+// AXIS: 1X=0, 2X=1, 4X=2；位编码 (xRate<<2)|yRate
+//   1x1=0  1x2=1  2x1=4  2x2=5  2x4=6  4x2=9  4x4=10
+uint VRSRateFromErrors(float errX, float errY)
+{
+    uint xRate = (errX >= _X2Threshold) ? 0u : ((errX < _X4Threshold) ? 2u : 1u);
+    uint yRate = (errY >= _X2Threshold) ? 0u : ((errY < _X4Threshold) ? 2u : 1u);
+    return (xRate << 2) | yRate;
+}
+
+// 串行版：一线程一 tile，取 tile 内最大梯度做固定阈值判决
+[numthreads(8, 8, 1)]
+void ComputeShadingRate(uint3 id : SV_DispatchThreadID)
+{
+    uint sriW, sriH;
+    _SriOut.GetDimensions(sriW, sriH);
+    if (id.x >= sriW || id.y >= sriH)
+        return;
+
+    float maxErrX = 0, maxErrY = 0;
+    [loop] for (int y = 0; y < _TileTexels; ++y)
+    [loop] for (int x = 0; x < _TileTexels; ++x)
+    {
+        float errX, errY;
+        TexelContribution(id.xy * _TileTexels + int2(x, y), errX, errY);
+        maxErrX = max(maxErrX, errX);
+        maxErrY = max(maxErrY, errY);
+    }
+
+    _SriOut[id.xy] = VRSRateFromErrors(maxErrX, maxErrY);
+}
+
+```
 > 当RenderTarget无法被Tile Size整除时，靠近X/Y = 1的Tile可能出现Shading Point (SV_Position) 大于等于1的情况。 如果使用Texture.load读取SV_Position坐标上的纹理数据数据可能导致问题（返回0）。
+因为SRI图需要在NativePlguin中创建，管理，设置。这里在C#创建一张大小与SRI相同的R8_UINT纹理，计算得到着色频率后在传入NativePlugin中， 通过CopyTextureRegion复制数据到SRI图上。
+``` C#
+// AddRenderPasses 中
+m_SetShadingRateImagePass.Setup(settings.x4Threshold, settings.x2Threshold, settings.sriComputeShader);
+
+internal class SetShadingRateImagePass : ScriptableRenderPass
+{
+    private float m_X4Threshold = 0.05f;
+    private float m_X2Threshold = 0.25f;
+    private ComputeShader m_SRICompute;
+    private int m_Kernel = -1;
+    private RTHandle m_SriSourceRT;
+
+    public SetShadingRateImagePass()
+    {
+        profilingSampler = new ProfilingSampler(nameof(SetShadingRateImagePass));
+    }
+
+    public void Setup(float x4Threshold, float x2Threshold, ComputeShader computeShader)
+    {
+        m_X4Threshold = x4Threshold;
+        m_X2Threshold = x2Threshold;
+        m_SRICompute = computeShader;
+        m_Kernel = m_SRICompute.FindKernel("ComputeShadingRate");
+    }
+
+    private void EnsureTileResources(int sriW, int sriH)
+    {
+        var desc = new RenderTextureDescriptor(sriW, sriH, GraphicsFormat.R8_UInt, 0);
+        desc.enableRandomWrite = true;
+        RenderingUtils.ReAllocateIfNeeded(ref m_SriSourceRT, desc, FilterMode.Point, TextureWrapMode.Clamp, name: "_VRSSriSource");
+    }
+
+    public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
+    {
+        var ptr = NativePluginBridge.RenderEventAndData;
+        if (ptr == System.IntPtr.Zero)
+            return;
+
+        var desc = renderingData.cameraData.cameraTargetDescriptor;
+        NativePluginBridge.SetShadingRateImageSize(desc.width, desc.height);
+
+        int tileSize = NativePluginBridge.GetShadingRateImageTileSizeQuery();
+        int sriW = (desc.width + tileSize - 1) / tileSize;
+        int sriH = (desc.height + tileSize - 1) / tileSize;
+        EnsureTileResources(sriW, sriH);
+
+        var cmd = CommandBufferPool.Get("LuminanceToSRI + SetSRI");
+
+        var lumRT = PostProcessPass.s_LuminanceRT; // 这里如果 VRSRenderFeature.cs 不在URP的程序集中的话，可能需要调整下PostProcessPass的访问权限。
+        if (lumRT != null)
+        {
+            int kernel = m_Kernel;
+
+            cmd.SetComputeTextureParam(m_SRICompute, kernel, "_LumGrad", lumRT);
+            cmd.SetComputeTextureParam(m_SRICompute, kernel, "_SriOut", m_SriSourceRT);
+            cmd.SetComputeIntParams(m_SRICompute, "_LumSize", lumRT.rt.width, lumRT.rt.height);
+            cmd.SetComputeIntParam(m_SRICompute, "_TileTexels", tileSize / 2);
+            cmd.SetComputeFloatParam(m_SRICompute, "_Sensitivity", settings.jndSensitivity);
+            cmd.SetComputeFloatParam(m_SRICompute, "_EnvLuma", settings.jndEnvLuma);
+            cmd.SetComputeFloatParam(m_SRICompute, "_QuarterRateK", settings.jndQuarterRateK);
+            cmd.SetRandomWriteTarget(0, m_SriSourceRT);           
+            cmd.DispatchCompute(m_SRICompute, kernel, (sriW + 7) / 8, (sriH + 7) / 8, 1);
+            cmd.ClearRandomWriteTargets();
+        }
+
+        // 2) 源贴图指针交给 native（立即 DllImport），再触发拷贝 + combiner + 绑定
+        NativePluginBridge.SetShadingRateImageSource(m_SriSourceRT.GetNativeTexturePtr(), sriW, sriH);
+        cmd.IssuePluginEventAndData(ptr, NativePluginBridge.SetAttachmentShadingRate_EVENT_ID, System.IntPtr.Zero);
+
+        context.ExecuteCommandBuffer(cmd);
+        CommandBufferPool.Release(cmd);
+    }
+}
+```
+修改 `SetShadingRateImage`, 增加复制纹路数据的操作。
+``` CPP
+bool RenderAPI_D3D12::SetShadingRateImage()
+{
+    if (!m_AttachmentVRSSupported || !m_SriResource)
+        return false;
+
+    UnityGraphicsD3D12RecordingState recordingState;
+    if (!m_D3D12->CommandRecordingState(&recordingState))
+        return false;
+
+    ID3D12GraphicsCommandList5* cmd5 = nullptr;
+    HRESULT hr = recordingState.commandList->QueryInterface(
+        IID_PPV_ARGS(&cmd5));
+    if (FAILED(hr) || !cmd5)
+        return false;
+
+    // 0. 源贴图（Unity 的 R8_UInt RenderTexture）barrier：COMMON → COPY_SOURCE
+    //    用 COMMON 作为 StateBefore：Unity 用 SetRandomWriteTarget 管理 UAV 状态，
+    //    COMMON 是通用状态，可安全进入 COPY_SOURCE，避免与 Unity 状态冲突。
+    D3D12_RESOURCE_BARRIER srcBarrier = {};
+    srcBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    srcBarrier.Transition.pResource = m_SriSource;
+    srcBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    srcBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+    srcBarrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    cmd5->ResourceBarrier(1, &srcBarrier);
+
+    // 1. 目标（SRI）barrier → COPY_DEST
+    if (m_SRIState != D3D12_RESOURCE_STATE_COPY_DEST)
+    {
+        D3D12_RESOURCE_BARRIER dstBarrier = {};
+        dstBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        dstBarrier.Transition.pResource = m_SriResource;
+        dstBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        dstBarrier.Transition.StateBefore = m_SRIState;
+        dstBarrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_COPY_DEST;
+        cmd5->ResourceBarrier(1, &dstBarrier);
+        m_SRIState = D3D12_RESOURCE_STATE_COPY_DEST;
+    }
+
+    // 2. 拷贝：Unity 贴图 → SRI（GPU→GPU，全程无 CPU 往返）
+    D3D12_TEXTURE_COPY_LOCATION dst = {};
+    dst.pResource = m_SriResource;
+    dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    dst.SubresourceIndex = 0;
+
+    D3D12_TEXTURE_COPY_LOCATION src = {};
+    src.pResource = m_SriSource;
+    src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    src.SubresourceIndex = 0;
+
+    cmd5->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+
+    // 3. 源贴图 barrier 回 COMMON（Unity 状态一致）
+    D3D12_RESOURCE_BARRIER srcBack = {};
+    srcBack.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    srcBack.Transition.pResource = m_SriSource;
+    srcBack.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    srcBack.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    srcBack.Transition.StateAfter  = D3D12_RESOURCE_STATE_COMMON;
+    cmd5->ResourceBarrier(1, &srcBack);
+
+    // 4. SRI barrier → SHADING_RATE_SOURCE
+    if (m_SRIState != D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE)
+    {
+        D3D12_RESOURCE_BARRIER transitionBarrier = {};
+        transitionBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        transitionBarrier.Transition.pResource = m_SriResource;
+        transitionBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        transitionBarrier.Transition.StateBefore = m_SRIState;
+        transitionBarrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE;
+        cmd5->ResourceBarrier(1, &transitionBarrier);
+        m_SRIState = D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE;
+    }
+
+    // 6. 绑定 SRI
+    cmd5->RSSetShadingRateImage(m_SriResource);
+    cmd5->Release();
+
+    return true;
+}
+``` 
+使用默认阈值(x4: 0.05; x2： 0.25) 时截帧看到的SRI图数据。
 
 ## 缺陷:
 以上介绍的方法只适合单线程渲染。因为开启多线程渲染后，URP中提交渲染指令的接口 与 commandline 的提交不在一个提交线程中。因而导致渲染线程生效前会重置渲染状态，二者不在一个CommandList中，导致VRS不生效。
