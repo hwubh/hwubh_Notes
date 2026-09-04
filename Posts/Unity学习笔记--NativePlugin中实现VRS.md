@@ -1181,7 +1181,7 @@ private RenderPassInputSummary GetRenderPassInputs(ref RenderingData renderingDa
 }
 ``` 
 
-修改 `SetShadingRateImagePass` pass，使用compute shader "sriComputeShader" 进行SRI图数据的计算和重投影。
+<!-- 修改 `SetShadingRateImagePass` pass，使用compute shader "sriComputeShader" 进行SRI图数据的计算和重投影。
 ``` c
 // sriComputeShader.compute
 // LuminanceToSRI.compute
@@ -1262,6 +1262,184 @@ void ComputeShadingRate(uint3 id : SV_DispatchThreadID)
     _SriOut[id.xy] = VRSRateFromErrors(maxErrX, maxErrY);
 }
 
+``` -->
+修改 `SetShadingRateImagePass` pass，使用compute shader "sriComputeShader" 进行SRI图数据的计算和重投影。 
+这里参考了[Intel分享的VALAR算法](https://www.google.com/url?sa=t&source=web&rct=j&opi=89978449&url=https://cdrdv2-public.intel.com/726649/GDC2022-VALAR-MD06-ATL11-2_v2_Adam_Marissa.pdf&ved=2ahUKEwj8goKhrdGWAxWsiuEIHUlAHEsQFnoECBsQAQ&usg=AOvVaw3ptgdglWmLL4O-kUSR_EHB)。 其大致思路如下图: ![20260903102407](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260903102407.png). 简单来说，其先计算如果采用了X2 shading rate情况下，Tile的亮度相较于采用了X1的情况会产生多大的误差。然后再计算一个阈值表示多大的误差刚好会被人眼察觉，比较二者来决定是否调整着色频率。
+这里将输入的半分辨率图按每组8*8个像素的区域进行分配，每个区域由一个8\*8\*1的线程组进行操作。每个线程组正好覆盖画面16\*16个像素的范围，即一个TileSize的范围，每个线程组计算的结果分别写入SRI上对应的像素中。
+在Kernel “ComputeShadingRateWave” 依次实现图中描述的各个阶段:
+Stage1 对应图中的第一个阶段"Initialize WaveSum Accumulators (SLM Memory)", 这里变量声明为 `groupshared` 上是因为当前设备上(RTX 3060)8\*8个线程无法在一个Wave中完成。
+``` C
+groupshared uint slmLumaSum;
+groupshared uint slmLumaSumX;
+groupshared uint slmLumaSumY;
+groupshared uint slmVelocityMin;
+
+// 一线程组 = 一个 tile（8x8 = 64 线程，匹配 NVIDIA tileSize=16*16）
+// Dispatch(sriW, sriH, 1)：组数 = tile 数 = SRI texel 数
+[numthreads(8, 8, 1)]
+void ComputeShadingRateWave(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID, uint groupIndex : SV_GroupIndex)
+{
+    uint sriWidth, sriHeight;
+    _SriOut.GetDimensions(sriWidth, sriHeight);
+    uint texels = (uint)(_TileTexels * _TileTexels);
+
+    // ===== Stage 1: Initialize SLM Accumulators — GI=0 (Blue) =====
+    if (groupIndex == 0)
+    {
+        slmLumaSum = 0;
+        slmLumaSumX = 0;
+        slmLumaSumY = 0;
+        slmVelocityMin = 0xFFFFFFFFu;
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+}
+```
+Stage 2 对应 "Compute X/Y Luminance Differences Per Tile (WaveActiveSum)", 计算各个Tile 64*64大小的像素块上的累计的误差。这里使用亮度差分（梯度）乘以半个粗像素宽度，估计半速率着色（x2）在X,Y分别造成的亮度误差。将同一Wave的误差累加，表示Wave总体亮度的变化的剧烈程度。
+``` C
+// 单 texel 贡献——整数域解码 + int 差分（避免 unsigned 回绕），最后统一缩放
+// 越界访问返回 0（D3D12 规范保证），边缘 tile 略微保守，与 VALAR 行为一致
+void TexelContribution(int2 texelPos, out float luma, out float errX, out float errY)
+{
+    uint e = _LumGrad[texelPos];
+
+    int l = (int)(e & 0xFF);
+    int h = (int)((e >> 8) & 0xFF);
+    int v = (int)((e >> 16) & 0xFF);
+
+    errX = (float)abs(h - l);
+    errY = (float)abs(v - l);
+    errX = max(errX, (float)abs(l - (int)(_LumGrad[texelPos + int2(1, 0)] & 0xFF)));
+    errY = max(errY, (float)abs(l - (int)(_LumGrad[texelPos + int2(0, 1)] & 0xFF)));
+
+    luma = l * INV_255;
+    errX *= INV_255_2;
+    errY *= INV_255_2;
+}
+
+
+    // tile 级重投影：MV 把采样位置偏回帧 N-1
+    int2 tileCenterPixel = (int2)groupId.xy * _TileTexels * 2 + _TileTexels;
+    uint mvW, mvH;
+    _MotionVectorTexture.GetDimensions(mvW, mvH);
+    tileCenterPixel = clamp(tileCenterPixel, int2(0, 0), int2((int)mvW - 1, (int)mvH - 1));
+    float2 motionVector = _MotionVectorTexture.Load(int3(tileCenterPixel, 0)).rg;
+    int2 tileOffset = int2(round(motionVector * float2(sriWidth, sriHeight)));
+    int2 tileReprojected = clamp(groupId.xy - tileOffset, int2(0, 0), int2(sriWidth, sriHeight) - 1);
+
+    // groupThreadId.xy 直接 = tile 内 texel 偏移（8x8 匹配 _TileTexels=8）
+    // _TileTexels < 8 时越界线程贡献 0（TexelContribution 内部检查 _LumSize 兜底）
+    int2 texelPos = tileReprojected * _TileTexels + (int2)groupThreadId.xy;
+
+    // ===== Stage 2: Compute X/Y Luminance Differences (WaveActiveSum) — Parallel (Green) =====
+    float luma = 0, errX = 0, errY = 0;
+    if (groupThreadId.x < _TileTexels && groupThreadId.y < _TileTexels)
+        TexelContribution(texelPos, luma, errX, errY);
+
+    // WaveActiveSum：波内 butterfly shuffle，结果广播到全波
+    float localWaveLumaSum = WaveActiveSum(luma);
+    float localWaveLumaSumX = WaveActiveSum(errX);
+    float localWaveLumaSumY = WaveActiveSum(errY);
+```
+Stage 3 对应 "Compute Minimum Tile Velocity"。 速度越快，越可以遮掩降低着色频率带来的误差。 这里优先考虑画面质量，计算Wave中像素的最小速度为准。
+```
+    // ===== Stage 3: Compute Minimum Tile Velocity — Parallel (Gray) =====
+    float3 velocity = float3(motionVector, 0);
+    float localWaveVelocityMin = WaveActiveMin(length(velocity));
+
+    // ===== Barrier 2 (Red) — 保证 WaveActiveSum 完成后再做 InterlockedAdd =====
+    GroupMemoryBarrierWithGroupSync();
+```
+Stage 4 对应 "Average X/Y Luminance (SLM + Atomic) " 使用原子操作跨Wave累加误差，得到整个Tile的累加误差。 然后除以Tile的像素数量，得到平均的亮度误差。
+> 因为原子操作只支持整数型，这里需要转换为UINT进行操作。
+``` C
+    // ===== Stage 4: Average X/Y Luminance (SLM + Atomic) — First Wave Lane (Purple) =====
+    if (WaveIsFirstLane())
+    {
+        InterlockedAdd(slmLumaSum, (uint)(localWaveLumaSum * UINT16_MAXF));
+        InterlockedAdd(slmLumaSumX, (uint)(localWaveLumaSumX * UINT16_MAXF));
+        InterlockedAdd(slmLumaSumY, (uint)(localWaveLumaSumY * UINT16_MAXF));
+        InterlockedMin(slmVelocityMin, (uint)(localWaveVelocityMin * UINT16_MAXF));
+    }
+
+    // ===== Barrier 3 (Red) — 保证所有波写入完成后再读 =====
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupIndex == 0)
+    {
+        float totalTileLuma  = slmLumaSum / UINT16_MAXF;
+        float totalTileLumaX = slmLumaSumX / UINT16_MAXF;
+        float totalTileLumaY = slmLumaSumY / UINT16_MAXF;
+        float minTileVelocity = slmVelocityMin / UINT16_MAXF;
+
+        float avgTileLuma = totalTileLuma / texels;
+        float avgErrorX = sqrt(totalTileLumaX / texels);
+        float avgErrorY = sqrt(totalTileLumaY / texels);
+    }
+```
+> 理论上论文给出的公式应该是 E = sqrt( mean( err² ) )，不知道为什么VALAR中为什么没有err²这一步。
+Stage 5 对应 "Just Noticeable Difference (JND) Threshold", 计算用于和平局误差比较的，“人眼是否能分辨出误差”的阈值。
+avgLuma 表示tile 的平均背景亮度，按论文的说法，因为人眼对暗部更为敏感，同一误差在暗处更容易被看见，在亮处更不明显。因此Tile的平均亮度越大，能容许的误差越大。
+EnvLuma 表示环境的基准亮度，用于白哦是环境光或者显示器的最低亮度（black level）。（感觉作用是避免(avgLuma + EnvLuma)过于接近0 ？）
+_Sensitivity 表示人眼的灵敏度阈值？ 主要通过控制该变量的取值来控制阈值的大小。取值越大，则认为该误差越不可见，着色频率也越小。
+``` C
+    if (groupIndex == 0)
+    {
+        // Stage 5: JND = Sensitivity * (avgLuma + EnvLuma) — Weber 定律
+        float jnd_threshold = _Sensitivity * (avgTileLuma + _EnvLuma);
+    }
+```
+Stage 6 对应 "Compute Shading Rate from Tile Average Luminance, Min Velocity & JND". 这里引入了速度， 对误差进调整。这里 ComputeHalfRateVelocityError， ComputeQuarterRateVelocityError 分别表示使用 $\times2$ 和 $\times4$ 着色频率下， 误差的调整。
+最后通过比较误差和jnd阈值确定最终的着色频率。
+``` C 
+// VALAR 速度误差修正（Yang 2019 论文 Eq.20/21）
+float ComputeHalfRateVelocityError(float v)
+{
+    return pow(1.0 / (1.0 + pow(1.05 * v, 3.10)), 0.35);
+}
+
+float ComputeQuarterRateVelocityError(float v)
+{
+    return _K * pow(1.0 / (1.0 + pow(0.55 * v, 2.41)), 0.49);
+}
+
+    if (groupIndex == 0)
+    {
+        // Stage 6: 速度修正 + X/Y 轴独立三档判决（VALAR Eq.16/14）
+        float velocityHError = ComputeHalfRateVelocityError(minTileVelocity);
+        float velocityQError = ComputeQuarterRateVelocityError(minTileVelocity);
+
+        uint xRate = 1; // 默认 2X
+        uint yRate = 1;
+
+        if ((velocityHError * avgErrorX) >= jnd_threshold)
+        {
+            xRate = 0; // 1X
+        }
+        else if ((velocityQError * avgErrorX) < jnd_threshold)
+        {
+            xRate = 2; // 4X
+        }
+
+        // 避免出现 1x4， 4x1. DX12 中不支持。
+        if ((velocityHError * avgErrorY) >= jnd_threshold)
+        {
+            yRate = (xRate == 2) ? 1 : 0;
+        }
+        else if ((velocityQError * avgErrorY) < jnd_threshold)
+        {
+            yRate = (xRate == 0) ? 1 : 2;
+        }
+    }
+```
+Stage 6 对应 "Write Shading Rate To VRS Tier 2 Buffer using Group Index". 将得到的着色频率编码后写入SRI中。
+``` C
+    if (groupIndex == 0)
+    {
+        // Stage 7: 写入 SRI（位编码 xRate<<2 | yRate）
+        _SriOut[groupId.xy] = (xRate << 2) | yRate;
+        _SriOut[groupId.xy] = WaveGetLaneCount();
+    }
 ```
 > 当RenderTarget无法被Tile Size整除时，靠近X/Y = 1的Tile可能出现Shading Point (SV_Position) 大于等于1的情况。 如果使用Texture.load读取SV_Position坐标上的纹理数据数据可能导致问题（返回0）。
 因为SRI图需要在NativePlguin中创建，管理，设置。这里在C#创建一张大小与SRI相同的R8_UINT纹理，计算得到着色频率后在传入NativePlugin中， 通过CopyTextureRegion复制数据到SRI图上。
@@ -1423,7 +1601,7 @@ bool RenderAPI_D3D12::SetShadingRateImage()
 }
 ``` 
 使用默认阈值(x4: 0.05; x2： 0.25) 时截帧看到的SRI图数据。
-
+![20260904173335](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260904173335.png)
 ## 缺陷:
 以上介绍的方法只适合单线程渲染。因为开启多线程渲染后，URP中提交渲染指令的接口 与 commandline 的提交不在一个提交线程中。因而导致渲染线程生效前会重置渲染状态，二者不在一个CommandList中，导致VRS不生效。
 此外Primitive Shading Rate 尝试写了下，
