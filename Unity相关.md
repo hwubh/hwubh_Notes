@@ -34,3 +34,70 @@
   - Xlua: https://www.huwenqiang.cn/articles/2023/08/10/1691646605632.html
 
 - 3： Object.instantiate(Object o) 传入的o默认是gameobject类型的？内部有动态转换成native的gameobject的步骤。
+- 4: 渲染顺序：
+  - renderers: 
+    Unity 中 opaque Renderer 的绘制顺序不是简单地根据 bounding box 中心到相机的距离来精确排序的。它采用多级排序键（sort
+      key），其中距离只占一部分，而且是量化（分桶）后的粗略距离。
+
+      1. Opaque 使用的排序标准
+
+      在 ScriptableDrawRenderers.h 中，opaque 的排序标准是：
+
+      kSortCommonOpaque = kSortSortingLayer | kSortRenderQueue | kSortQuantizedFrontToBack | kSortOptimizeStateChanges |
+      kSortCanvasOrder,
+
+      即：Sorting Layer → Render Queue → 量化距离（前到后）→ 状态优化 → Canvas 顺序。
+
+      2. 排序比较顺序（RenderObjectSorter::operator()）
+
+      在 ScriptableDrawRenderers.cpp L1612 中，比较器按以下优先级依次比较：
+
+      3. 全局 Sorting Layer（CompareGlobalLayeringData）
+      4. RenderQueue（queueIndex）
+      5. Renderer Priority（若启用）
+      6. 距离排序（opaque 走 kSortQuantizedFrontToBack 分支）
+      7. 状态优化（kSortOptimizeStateChanges）：SRP 批处理兼容性 → RendererType → LOD Fade → 静态批处理 → 光照贴图 → 材质 →
+          几何体
+
+      8. Canvas 顺序（sameDistanceSortPriority）
+
+      9. 距离如何计算（关键点）
+
+      距离不是用 bounding box 中心到相机的直线距离，而是：
+
+      // ComputeSortingDistance, L1797
+      const float distance = worldToCameraMatrix.MultiplyPoint3(center).z;  // 视图空间 Z
+
+      - Perspective（默认）：distanceForSort = -SqrMagnitude(center -
+        cameraPos)，即中心点到相机距离的平方的负值（省去开方）。
+      - Orthographic：直接用视图空间 Z。
+      - CustomAxis：沿自定义轴的点积。
+
+      其中 center 来自 srd.m_TransformInfo.worldAABB.GetCenter()，即 world-space AABB（包围盒）的中心。如果对象属于
+      SortingGroup，则用 SortingGroup 的 AABB 中心。
+
+      1. 距离是"量化分桶"的，不是精确排序
+
+      opaque 用的是 kSortQuantizedFrontToBack，在 RenderLoopPrivate.h L126：
+
+      inline UInt32 GetOpaqueDepthSortBucket(float distance)
+      {
+          union { float f; UInt32 i; } f2i;
+          f2i.f = distance;
+          return f2i.i >> 24; // 取最高 8 位
+      }
+
+      它把距离浮点数的最高 8 位作为桶号，桶边界大致在 0.125, 0.5, 2, 8, 32, 128, 512, 2048
+      等单位处。也就是说，同一桶内的对象顺序不保证，只保证"大致前到后"。这是为了 GPU Z-culling 效率（先画近的，减少
+      overdraw），而不是精确排序。
+
+      2. 为什么 opaque 不需要精确排序
+
+      因为 opaque 对象开启深度测试/深度写入，绘制顺序不影响最终结果（后画的会被深度测试剔除）。所以 Unity 用"粗略前到后 +
+      状态优化"来最大化批处理和 GPU 效率，而不是精确排序。
+
+      ---
+
+      总结：opaque 的绘制顺序由 Sorting Layer → RenderQueue → 量化距离桶（前到后）→ 状态优化（批处理/材质/几何）
+      决定。距离基于 world AABB 中心，但只取浮点高 8 位做粗略分桶，并非精确按包围盒排序。
+  - triangles: 

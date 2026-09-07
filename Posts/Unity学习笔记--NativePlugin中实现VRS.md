@@ -12,7 +12,7 @@
 通过调整调整着色计算频率，可以在保留三角形的像素边缘的同时，减少着色计算的次数。
 > 因此，个人觉得Metal的 RRM (Rasterization Rate Map)这种在光栅化阶段做处理，改变了实际像素分配的技术，可能不太能算VRS？
 > Nvapi中的VRS还提供在一个像素中多次进行着色计算的选项。个人觉得可以算是SSAA的上位替代？ 在不提升分辨率的情况下，提升了渲染精度。
-> 
+
 常见的着色频率(shading rate)输入包含 **pipelne shading rate**, **attachment shading rate** 和 **primitive shading rate**，三者的控制粒度大致上是从粗到细的。
 Pipeline shading rate (Per Drawcall)是最基础的全局设置。其的粒度为Drawcall的，一般通过dynamic state在不同Drawcall之间动态设置。
 Attachment shading rate (Per attachment) 通过绑定一张R8_UINT格式的屏幕空间图像附件(Shading Rate Image, **SRI**)进行直到。其粒度为 $8\times8 \to 32\times32$ 的像素块，图像附件上一个像素对应屏幕上一个像素块范围内的着色频率。
@@ -633,7 +633,7 @@ public:
     UINT GetShadingRateImageTileSize() const { return m_ShadingRateImageTileSize; }
 };
 ```
-将RenderTarget尺寸除以TileSize后向上取整，得到SRI图的尺寸(Tile 数量)
+<!-- 将RenderTarget尺寸除以TileSize后向上取整，得到SRI图的尺寸(Tile 数量)
 ``` C#
 // NativePluginBridge.cs
 public static class NativePluginBridge
@@ -690,9 +690,11 @@ bool RenderAPI_D3D12::SetShadingRateImageSize(int width, int height)
     CreateShadingRateImage(sriWidth, sriHeight);
     return m_SriResource != nullptr;
 }
-```
+``` -->
 
 在NativePlugin侧实现创建SRI的函数`CreateShadingRateImage`。 SRI的格式可以参考[官方文档](https://learn.microsoft.com/en-us/windows/win32/direct3d12/vrs#format-layout-resource-properties)
+为了避免因为RenderTarget尺寸变化（主要是Editor下）而频繁创建/释放 SRI, 这里预先申请一张足够大的RT作为SRI。
+> SRI的有效范围为 向上取整的(RenderTarget 的尺寸 除以 TileSize)。DX12中如果SRI的尺寸大于有效范围，超出的部分会被忽略。
 ``` h
 // RenderAPI_D3D12.h
 class RenderAPI_D3D12
@@ -700,36 +702,34 @@ class RenderAPI_D3D12
 private:
 
     // SRI related parameters.
-    ID3D12Resource* m_SriResource = nullptr; // SRI 图
+    ID3D12Resource* m_SriResource = nullptr; // SRI 图（max 尺寸）
     D3D12_RESOURCE_STATES m_SRIState = D3D12_RESOURCE_STATE_COMMON;
-    int m_SriWidth = 0;
-    int m_SriHeight = 0;
+    static constexpr UINT m_SriMaxTexelsW = 512;
+    static constexpr UINT m_SriMaxTexelsH = 256;
 
-    void CreateShadingRateImage(int width, int height);
+    bool CreateShadingRateImage();
     void ReleaseShadingRateImage();
 };
 ```
 ``` cpp
 // RenderAPI_D3D12.cpp
-void RenderAPI_D3D12::CreateShadingRateImage(int width, int height)
+bool RenderAPI_D3D12::CreateShadingRateImage()
 {
     ID3D12Device* device = m_D3D12 ? m_D3D12->GetDevice() : nullptr;
-    if (!device)
-    {
-        VRSLog("[VRS] CreateShadingRateImage: null device\n");
-        return;
-    }
+    if (!device || m_SriMaxTexelsW == 0 || m_SriMaxTexelsH == 0)
+        return false;
 
-    ReleaseShadingRateImage();
-
-    // 1) SRI 纹理：R8_UINT + ALLOW_UNORDERED_ACCESS，初始 UNORDERED_ACCESS
+    // 1) SRI：R8_UINT max 尺寸纹理，初始 COMMON（堆 DEFAULT，flags=NONE）
+    //    超配合法：DirectX-Specs "If the screen space image is larger than it needs
+    //    to be for a given render target, the extra portions at the right and/or
+    //    bottom are not used."
     D3D12_HEAP_PROPERTIES heapProps = {};
     heapProps.Type = D3D12_HEAP_TYPE_DEFAULT; // GPU-local
 
     D3D12_RESOURCE_DESC desc = {};
     desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    desc.Width = width;
-    desc.Height = height;
+    desc.Width = m_SriMaxTexelsW;
+    desc.Height = m_SriMaxTexelsH;
     desc.DepthOrArraySize = 1;
     desc.MipLevels = 1;
     desc.Format = DXGI_FORMAT_R8_UINT;
@@ -740,20 +740,20 @@ void RenderAPI_D3D12::CreateShadingRateImage(int width, int height)
         D3D12_RESOURCE_STATE_COMMON, nullptr,
         IID_PPV_ARGS(&m_SriResource));
     if (FAILED(hr) || !m_SriResource)
-    {
-        VRSLog("[VRS] CreateShadingRateImage failed hr=0x%08X\n", (unsigned)hr);
-        return;
-    }
+        return false;
 
-    m_SRIState = D3D12_RESOURCE_STATE_COMMON;   // 记录SRI的状态
+    // 未使用区域不被采样（spec: "the extra portions at the right and/or bottom are not used"），
+    // 无需零填充。直接停在 COMMON，首次 SetShadingRateImage 的 barrier 会转到 COPY_DEST。
+    m_SRIState = D3D12_RESOURCE_STATE_COMMON;
+
+    return true;
 }
 
 void RenderAPI_D3D12::ReleaseShadingRateImage()
 {
+    // 仅 OnDeviceShutdown 调用：设备销毁时 GPU 工作已终止，立即释放安全
     SAFE_RELEASE(m_SriResource);
-    m_SriWidth = 0;
-    m_SriHeight = 0;
-    m_SRIState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    m_SRIState = D3D12_RESOURCE_STATE_COMMON;
 }
 
 void RenderAPI_D3D12::OnDeviceShutdown()
@@ -779,27 +779,17 @@ private:
 bool RenderAPI_D3D12::SetShadingRateImage()
 {
     if (!m_ImageVRSSupported || !m_SriResource || !m_SriSource)
-    {
-        VRSLog("[VRS] SetShadingRateImage: not supported or source missing (sri=%p source=%p)\n",
-            m_SriResource, m_SriSource);
         return false;
-    }
 
     UnityGraphicsD3D12RecordingState recordingState;
     if (!m_D3D12->CommandRecordingState(&recordingState))
-    {
-        VRSLog("[VRS] SetShadingRateImage: CommandRecordingState returned false\n");
         return false;
-    }
 
     ID3D12GraphicsCommandList5* cmd5 = nullptr;
     HRESULT hr = recordingState.commandList->QueryInterface(
         IID_PPV_ARGS(&cmd5));
     if (FAILED(hr) || !cmd5)
-    {
-        OutputDebugStringA("[VRS] SetShadingRateImage: QueryInterface for ID3D12GraphicsCommandList5 failed\n");
         return false;
-    }
 
     // SRI barrier 需要设置为 D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE.
     if (m_SRIState != D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE)
@@ -817,62 +807,31 @@ bool RenderAPI_D3D12::SetShadingRateImage()
     cmd5->RSSetShadingRateImage(m_SriResource);
     cmd5->Release();
 
-    VRSLog("[VRS] SetShadingRateImage: sri=%p source=%p cmdList=%p copy=(%dx%d)\n",
-        m_SriResource, m_SriSource, recordingState.commandList, m_SriWidth, m_SriHeight);
     return true;
 }
 
 bool RenderAPI_D3D12::ClearShadingRateImage()
 {
-    if (!m_ImageVRSSupported || !m_SriResource)
-    {
-        OutputDebugStringA("[VRS] ClearShadingRateImage: Image VRS not supported or SRI not created\n");
+    if (!m_AttachmentVRSSupported || !m_SriResource)
+        VRSLog("[VRS-DIAG] ClearShadingRateImage early-return: unsupported or SRI not created\n");
         return false;
-    }
 
     UnityGraphicsD3D12RecordingState recordingState;
     if (!m_D3D12->CommandRecordingState(&recordingState))
-    {
-        OutputDebugStringA("[VRS] ClearShadingRateImage: CommandRecordingState returned false\n");
         return false;
-    }
 
     // 统一使用 cmd5，所有操作都用它。
     ID3D12GraphicsCommandList5* cmd5 = nullptr;
     HRESULT hr = recordingState.commandList->QueryInterface(
         IID_PPV_ARGS(&cmd5));
     if (FAILED(hr) || !cmd5)
-    {
-        OutputDebugStringA("[VRS] ClearShadingRateImage: QueryInterface for ID3D12GraphicsCommandList5 failed\n");
         return false;
-    }
 
-    // 解除 SRI 绑定
+    // 解除 SRI 绑定（只解绑，不转回 COMMON——下一帧 set 事件直接
+    // SHADING_RATE_SOURCE → COPY_DEST，每帧省一对 barrier）
     cmd5->RSSetShadingRateImage(nullptr);
-
-    // 恢复 combiner 为 PASSTHROUGH，避免影响后续渲染
-    D3D12_SHADING_RATE_COMBINER combiners[2] = {
-        D3D12_SHADING_RATE_COMBINER_PASSTHROUGH,
-        D3D12_SHADING_RATE_COMBINER_PASSTHROUGH
-    };
-    cmd5->RSSetShadingRate(D3D12_SHADING_RATE_1X1, combiners);
-
-    // 解除绑定后，把 SRI 资源状态切回 COPY_DEST，供下次填充。
-    if (m_SRIState == D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE)
-    {
-        D3D12_RESOURCE_BARRIER barrier = {};
-        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        barrier.Transition.pResource = m_SriResource;
-        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE;
-        barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_COMMON;
-        cmd5->ResourceBarrier(1, &barrier);
-        m_SRIState = D3D12_RESOURCE_STATE_COMMON;
-    }
-
     cmd5->Release();
 
-    OutputDebugStringA("[VRS] ClearShadingRateImage: RSSet(nullptr) + combiner restore + transition back to COPY_DEST\n");
     return true;
 }
 ```
@@ -994,10 +953,6 @@ internal class SetShadingRateImagePass : ScriptableRenderPass
         if (ptr == System.IntPtr.Zero)
             return;
 
-        // SRI 尺寸由 RenderTarget 和 TileSize 决定，绑定前先同步给 Native 侧
-        var desc = renderingData.cameraData.cameraTargetDescriptor;
-        NativePluginBridge.SetShadingRateImageSize(desc.width, desc.height);
-
         var cmd = CommandBufferPool.Get("SetShadingRateImage");
         if (cmd == null)
             return;
@@ -1043,7 +998,7 @@ internal class ResetShadingRateImagePass : ScriptableRenderPass
 ![20260831183347](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260831183347.png)
 
 一般来说，实际项目中多根据渲染画面的亮度梯度控制画面着色频率的分布。 大致思路是: 在帧末尾计算画面各个区域(Tile)的亮度梯度，与设置的阈值进行比较, 得到各个区域的着色频率，记录在SRI图上。下一帧绘制场景前，将SRI图进行重投影并设置在管线上。
-首先修改`VRSRenderFeature`，在 inspector 上添加用于比较梯度的阈值, 和挂载用于计算着色频率用的compute shader "sriComputeShader"
+<!-- 首先修改`VRSRenderFeature`，在 inspector 上添加用于比较梯度的阈值, 和挂载用于计算着色频率用的compute shader "sriComputeShader"
 ``` C#
 // VRSRenderFeature.cs
 public class Settings
@@ -1054,35 +1009,28 @@ public class Settings
 
     public ComputeShader sriComputeShader;
 }
-```
+``` -->
 在后处理阶段使用 wave intrinsic 获取Quad($2\times2$像素块)上的感知亮度，写入一张半分辨率，可随机读写的R32_UINT纹理中。
 ``` C#
 // Packages\com.unity.render-pipelines.universal\Runtime\Passes\PostProcessPass.cs
 internal class PostProcessPass : ScriptableRenderPass
 {
-    RTHandle s_LuminanceRT;
-
-    public void Dispose()
-    {
-        //...
-        s_LuminanceRT?.Release();
-    }
-
     void Render(CommandBuffer cmd, ref RenderingData renderingData)
     {
         //...
         if (cameraData.cameraType == CameraType.Game)
         {
-            int w = (cameraData.cameraTargetDescriptor.width + 1) / 2;
-            int h = (cameraData.cameraTargetDescriptor.height + 1) / 2;
-            if (s_LuminanceRT == null || s_LuminanceRT.rt.width != w || s_LuminanceRT.rt.height != h)
+            var vrsRenderer = cameraData.renderer as UniversalRenderer;
+            var luminanceRT = vrsRenderer?.luminanceRT;
+            if (luminanceRT == null || luminanceRT.rt.width != w || luminanceRT.rt.height != h)
             {
-                s_LuminanceRT?.Release();
-                s_LuminanceRT = RTHandles.Alloc(w, h, colorFormat: GraphicsFormat.R32_UInt,
-                                                    enableRandomWrite: true, name: "_LumGradUAV");
+                luminanceRT?.Release();
+                luminanceRT = RTHandles.Alloc(w, h, colorFormat: GraphicsFormat.R32_UInt,
+                    enableRandomWrite: true, name: "_LuminanceTex");
+                vrsRenderer.SetLuminanceRT(luminanceRT);
             }
             m_Materials.uber.EnableKeyword("_VRS_LUMA_OUTPUT");
-            cmd.SetRandomWriteTarget(1, s_LuminanceRT);
+            cmd.SetRandomWriteTarget(1, luminanceRT);
         }
         // Done with Uber, blit it
         //...
@@ -1090,6 +1038,15 @@ internal class PostProcessPass : ScriptableRenderPass
             cmd.ClearRandomWriteTargets();
     }
 }
+```
+``` C#
+// Packages\com.unity.render-pipelines.universal\Runtime\UniversalRenderer.cs
+public RTHandle luminanceRT { get; private set; }
+internal void SetLuminanceRT(RTHandle rt) => luminanceRT = rt;
+
+// Dispose() 与 ReleaseRenderTargets() 中
+luminanceRT?.Release();
+luminanceRT = null;
 ```
 ``` C
 // Packages\com.unity.render-pipelines.universal\Shaders\PostProcessing\UberPost.shader
@@ -1344,8 +1301,22 @@ void TexelContribution(int2 texelPos, out float luma, out float errX, out float 
 Stage 3 对应 "Compute Minimum Tile Velocity"。 速度越快，越可以遮掩降低着色频率带来的误差。 这里优先考虑画面质量，计算Wave中像素的最小速度为准。
 ```
     // ===== Stage 3: Compute Minimum Tile Velocity — Parallel (Gray) =====
-    float3 velocity = float3(motionVector, 0);
-    float localWaveVelocityMin = WaveActiveMin(length(velocity));
+    int2 quadBase = int2(groupId.xy * (_TileTexels * 2)) + int2(groupThreadId.xy * 2);
+
+    float quadMinVelocity = 3.402823466e+38;
+    [unroll]
+    for (int dy = 0; dy < 2; ++dy)
+    {
+        [unroll]
+        for (int dx = 0; dx < 2; ++dx)
+        {
+            int2 mvPixel = clamp(quadBase + int2(dx, dy),
+                                int2(0, 0),
+                                int2((int)mvW - 1, (int)mvH - 1));
+            float2 mv = _MotionVectorTexture.Load(int3(mvPixel, 0)).rg;
+            quadMinVelocity = min(quadMinVelocity, length(mv * float2(mvW, mvH)));
+        }
+    }
 
     // ===== Barrier 2 (Red) — 保证 WaveActiveSum 完成后再做 InterlockedAdd =====
     GroupMemoryBarrierWithGroupSync();
@@ -1438,19 +1409,19 @@ Stage 6 对应 "Write Shading Rate To VRS Tier 2 Buffer using Group Index". 将�
     {
         // Stage 7: 写入 SRI（位编码 xRate<<2 | yRate）
         _SriOut[groupId.xy] = (xRate << 2) | yRate;
-        _SriOut[groupId.xy] = WaveGetLaneCount();
     }
 ```
 > 当RenderTarget无法被Tile Size整除时，靠近X/Y = 1的Tile可能出现Shading Point (SV_Position) 大于等于1的情况。 如果使用Texture.load读取SV_Position坐标上的纹理数据数据可能导致问题（返回0）。
 因为SRI图需要在NativePlguin中创建，管理，设置。这里在C#创建一张大小与SRI相同的R8_UINT纹理，计算得到着色频率后在传入NativePlugin中， 通过CopyTextureRegion复制数据到SRI图上。
 ``` C#
 // AddRenderPasses 中
-m_SetShadingRateImagePass.Setup(settings.x4Threshold, settings.x2Threshold, settings.sriComputeShader);
+m_SetShadingRateImagePass.Setup(settings.jndSensitivity, settings.jndEnvLuma, settings.jndQuarterRateK, settings.sriComputeShader);
 
 internal class SetShadingRateImagePass : ScriptableRenderPass
 {
-    private float m_X4Threshold = 0.05f;
-    private float m_X2Threshold = 0.25f;
+    private float m_Sensitivity = 0.5f;
+    private float m_EnvLuma = 0.1f;
+    private float m_K = 2.13f;
     private ComputeShader m_SRICompute;
     private int m_Kernel = -1;
     private RTHandle m_SriSourceRT;
@@ -1460,12 +1431,13 @@ internal class SetShadingRateImagePass : ScriptableRenderPass
         profilingSampler = new ProfilingSampler(nameof(SetShadingRateImagePass));
     }
 
-    public void Setup(float x4Threshold, float x2Threshold, ComputeShader computeShader)
+    public void Setup(float sensitivity, float envLuma, float k, ComputeShader computeShader)
     {
-        m_X4Threshold = x4Threshold;
-        m_X2Threshold = x2Threshold;
+        m_Sensitivity = sensitivity;
+        m_EnvLuma = envLuma;
+        m_K = k;
         m_SRICompute = computeShader;
-        m_Kernel = m_SRICompute.FindKernel("ComputeShadingRate");
+        m_Kernel = m_SRICompute.FindKernel("ComputeShadingRateWave");
     }
 
     private void EnsureTileResources(int sriW, int sriH)
@@ -1481,17 +1453,18 @@ internal class SetShadingRateImagePass : ScriptableRenderPass
         if (ptr == System.IntPtr.Zero)
             return;
 
+        // 源 RT 尺寸 = tile 网格。native SRI 为 max-size 一次性分配（Fix Plan §3.5），
+        // 不再经主线程 P/Invoke 同步尺寸
         var desc = renderingData.cameraData.cameraTargetDescriptor;
-        NativePluginBridge.SetShadingRateImageSize(desc.width, desc.height);
-
         int tileSize = NativePluginBridge.GetShadingRateImageTileSizeQuery();
-        int sriW = (desc.width + tileSize - 1) / tileSize;
-        int sriH = (desc.height + tileSize - 1) / tileSize;
-        EnsureTileResources(sriW, sriH);
+        int sriWith = Mathf.CeilToInt(desc.width  / (float)tileSize);
+        int sriHeight = Mathf.CeilToInt(desc.height / (float)tileSize);
+
+        EnsureTileResources(sriWith, sriHeight);
 
         var cmd = CommandBufferPool.Get("LuminanceToSRI + SetSRI");
 
-        var lumRT = PostProcessPass.s_LuminanceRT; // 这里如果 VRSRenderFeature.cs 不在URP的程序集中的话，可能需要调整下PostProcessPass的访问权限。
+        var lumRT = (renderingData.cameraData.renderer as UniversalRenderer)?.luminanceRT;
         if (lumRT != null)
         {
             int kernel = m_Kernel;
@@ -1500,17 +1473,19 @@ internal class SetShadingRateImagePass : ScriptableRenderPass
             cmd.SetComputeTextureParam(m_SRICompute, kernel, "_SriOut", m_SriSourceRT);
             cmd.SetComputeIntParams(m_SRICompute, "_LumSize", lumRT.rt.width, lumRT.rt.height);
             cmd.SetComputeIntParam(m_SRICompute, "_TileTexels", tileSize / 2);
-            cmd.SetComputeFloatParam(m_SRICompute, "_Sensitivity", settings.jndSensitivity);
-            cmd.SetComputeFloatParam(m_SRICompute, "_EnvLuma", settings.jndEnvLuma);
-            cmd.SetComputeFloatParam(m_SRICompute, "_QuarterRateK", settings.jndQuarterRateK);
-            cmd.SetRandomWriteTarget(0, m_SriSourceRT);           
-            cmd.DispatchCompute(m_SRICompute, kernel, (sriW + 7) / 8, (sriH + 7) / 8, 1);
+            cmd.SetComputeFloatParam(m_SRICompute, "_Sensitivity", m_Sensitivity);
+            cmd.SetComputeFloatParam(m_SRICompute, "_EnvLuma", m_EnvLuma);
+            cmd.SetComputeFloatParam(m_SRICompute, "_K", m_K);
+            cmd.SetRandomWriteTarget(0, m_SriSourceRT);
+            cmd.DispatchCompute(m_SRICompute, kernel, sriWith, sriHeight, 1);   // 组数 = tile 数（一线程组一 tile）
             cmd.ClearRandomWriteTargets();
-        }
 
-        // 2) 源贴图指针交给 native（立即 DllImport），再触发拷贝 + combiner + 绑定
-        NativePluginBridge.SetShadingRateImageSource(m_SriSourceRT.GetNativeTexturePtr(), sriW, sriH);
-        cmd.IssuePluginEventAndData(ptr, NativePluginBridge.SetAttachmentShadingRate_EVENT_ID, System.IntPtr.Zero);
+            //  源贴图指针经 IssuePluginEventAndData 的 data 参数传入 native（GPU timeline），
+            //  消除同帧多 pass 覆盖竞态。必须在 lumRT 非空时才绑定：dispatch 未执行时
+            //  源 RT 是未初始化字节（非法 rate 编码），拷入 SRI 会导致 device removed（Fix Plan §3.5）
+            IntPtr srcNativeTex = m_SriSourceRT.rt.GetNativeTexturePtr();
+            cmd.IssuePluginEventAndData(ptr, NativePluginBridge.SetAttachmentShadingRate_EVENT_ID, srcNativeTex);
+        }
 
         context.ExecuteCommandBuffer(cmd);
         CommandBufferPool.Release(cmd);
@@ -1600,7 +1575,19 @@ bool RenderAPI_D3D12::SetShadingRateImage()
     return true;
 }
 ``` 
-使用默认阈值(x4: 0.05; x2： 0.25) 时截帧看到的SRI图数据。
+最后修改下模块定义文件 "GfxPluginVRSPlugin.def"。
+``` def
+LIBRARY GfxPluginVRSPlugin
+EXPORTS
+    UnityPluginLoad
+    UnityPluginUnload
+    GetRenderEventFunc
+    IsPipelineVRSSupported
+    IsAttachmentVRSSupported
+    GetShadingRateImageTileSize
+```
+
+使用默认阈值() 时截帧看到的SRI图数据。
 ![20260904173335](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260904173335.png)
 ## 缺陷:
 以上介绍的方法只适合单线程渲染。因为开启多线程渲染后，URP中提交渲染指令的接口 与 commandline 的提交不在一个提交线程中。因而导致渲染线程生效前会重置渲染状态，二者不在一个CommandList中，导致VRS不生效。
