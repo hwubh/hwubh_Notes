@@ -1354,11 +1354,11 @@ avgLuma 表示tile 的平均背景亮度，按论文的说法，因为人眼对�
 EnvLuma 表示环境的基准亮度，用于白哦是环境光或者显示器的最低亮度（black level）。（感觉作用是避免(avgLuma + EnvLuma)过于接近0 ？）
 _Sensitivity 表示人眼的灵敏度阈值？ 主要通过控制该变量的取值来控制阈值的大小。取值越大，则认为该误差越不可见，着色频率也越小。
 ``` C
-    if (groupIndex == 0)
-    {
-        // Stage 5: JND = Sensitivity * (avgLuma + EnvLuma) — Weber 定律
-        float jnd_threshold = _Sensitivity * (avgTileLuma + _EnvLuma);
-    }
+if (groupIndex == 0)
+{
+    // Stage 5: JND = Sensitivity * (avgLuma + EnvLuma) — Weber 定律
+    float jnd_threshold = _Sensitivity * (avgTileLuma + _EnvLuma);
+}
 ```
 Stage 6 对应 "Compute Shading Rate from Tile Average Luminance, Min Velocity & JND". 这里引入了速度， 对误差进调整。这里 ComputeHalfRateVelocityError， ComputeQuarterRateVelocityError 分别表示使用 $\times2$ 和 $\times4$ 着色频率下， 误差的调整。
 最后通过比较误差和jnd阈值确定最终的着色频率。
@@ -1403,7 +1403,7 @@ float ComputeQuarterRateVelocityError(float v)
         }
     }
 ```
-Stage 6 对应 "Write Shading Rate To VRS Tier 2 Buffer using Group Index". 将得到的着色频率编码后写入SRI中。
+Stage 7 对应 "Write Shading Rate To VRS Tier 2 Buffer using Group Index". 将得到的着色频率编码后写入SRI中。
 ``` C
     if (groupIndex == 0)
     {
