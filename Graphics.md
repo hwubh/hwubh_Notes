@@ -171,7 +171,7 @@
     准备 Hierachical Z-Buffer: 获取一张遮挡体的深度信息的深度图。通过将采用声明Mipmap。Mipmap存储的是深度的最大值而不是平均值。
     > 只渲染遮挡体可能导致深度图上的一些像素缺少深度信息（出现所谓的“**洞**”）。《大革命》中选择默认值为0，这可能导致出现错误剔除。 但填入1的话，会导致高级别Mipmap的取值皆为1.
     遮挡查询：被遮挡体的包围盒投影到屏幕空间，然后找到一个mipmap层级使其包围盒只覆盖2x2个像素。 首先将被遮挡体的包围盒的顶点，变换到屏幕空间，得到屏幕空间中uv方向的包围盒。 根据该包围盒在Mip0的UV方向覆盖了多少个像素（覆盖像素较多的那个方向），计算并选择合适的Mipmap层级进行深度比较。 使用包围的顶点作为uv坐标，采用Mipmap层的深度图进行深度比较，如果四个深度值都比顶点的深度小，则说明该被遮挡体被遮挡了，需要被剔除。
-    - 大革命： 挑选最近300个遮挡提做全屏渲染深度，用于Hi-z和 Early-Z。 同时这张图可以与经过了重映射的上一帧深度图之间进行互相补“**洞**”的操作。
+    - 大革命： 挑选最近300个遮挡体做全屏渲染深度，用于Hi-z和 Early-Z。 同时这张图可以与经过了重映射的上一帧深度图之间进行互相补“**洞**”的操作。
       - Shadowmap相机进行遮挡剔除： 将主相机的深度图均分为等大的Tile（16*16），选择深度最大的Z值。结合近平面的Z值，深度最大的Z，与Tile在相机空间的XY值构成一个长方体。使用该长方体作为阴影贴图相机的遮挡体。
     - Two-Phase Occlusion Culling就是：第一阶段用上一帧的depth pyramid先剔除一遍物体， 渲染可见物体，第二阶段先生成当帧的depth pyramid，再用新的depth pyramid重新剔除第一阶段已经被剔除掉的物体，渲染上一帧不可见，但是这一帧可见的物体。
     > 快速移动相机时的处理方法:
@@ -222,6 +222,125 @@
         - Windowing： 给高阶因子乘以衰减因子。
         - Clamp: UE 取最强方向对面光照的光强度作为最小光强度，将最小光强度 clamp 到至少最强光的 5%。
   - 环境光的高光部分： IBL的环境高光： Radiance map ？ -> 反射探针？ split-sum来算不同粗糙度的？
+    - split-sum： 本质上相当于将 L\*DGF 拆分成了 L\*D + GF. 其中D在反射探针中一般使用 GGX 分布。 
+      - LD部分的计算示例: https://github.com/advancedfx/afx-unity-srp/blob/advancedfx/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl
+        ``` C
+        real4 IntegrateLD(TEXTURECUBE_PARAM(tex, sampl),
+                   TEXTURE2D(ggxIblSamples),
+                   real3 V,
+                   real3 N,
+                   real roughness,
+                   real index,      // Current MIP level minus one
+                   real invOmegaP,
+                   uint sampleCount, // Must be a Fibonacci number
+                   bool prefilter,
+                   bool usePrecomputedSamples)
+        {// pre-filter 图假设了 N = R = V
+            real3x3 localToWorld = GetLocalFrame(N);//GetLocalFrame(N) 构造的 localToWorld 把局部空间的 Z 轴对齐到世界法线N
+
+        #ifndef USE_KARIS_APPROXIMATION
+            real NdotV       = 1; // N == V
+            real partLambdaV = GetSmithJointGGXPartLambdaV(NdotV, roughness); //G代表的权重分为两部分，一部分是 V方向上被遮挡的。使用 partLambdaV，NdotV表示。 一部分是 L方向上被遮挡的，使用NdotL 表示。 这里 NdotV = 1，因此 NdotV 和 partLambdaV 对于各个采样点来说是常量。
+        #endif
+
+            real3 lightInt = real3(0.0, 0.0, 0.0);
+            real  cbsdfInt = 0.0;
+
+            for (uint i = 0; i < sampleCount; ++i) // 采样重要性采样，只计算sampleCount个采样点。 采样点的位置遵循Fibonacci 分布。
+            {
+                real3 L;
+                real  NdotL, NdotH, LdotH;
+
+                if (usePrecomputedSamples) // 预烘培 局部空间下的入射角
+                {
+                    // Performance warning: using a texture LUT will generate a vector load,
+                    // which increases both the VGPR pressure and the workload of the
+                    // texture unit. A better solution here is to load from a Constant, Raw
+                    // or Structured buffer, or perhaps even declare all the constants in an
+                    // HLSL header to allow the compiler to inline everything.
+                    real3 localL = LOAD_TEXTURE2D(ggxIblSamples, uint2(i, index)).xyz;
+
+                    L     = mul(localL, localToWorld); //localL 是在以 N 为 Z 轴的局部坐标系里表示的采样方向。
+                    NdotL = localL.z;
+                    LdotH = sqrt(0.5 + 0.5 * NdotL); // 这里H是微表面的半向量H。 只有当采样恰好落在波瓣中心时，才有 H=NH=N，进而 L=NL=N。
+                }
+                else
+                {
+                    real2 u = Fibonacci2d(i, sampleCount); // Fibonacci2d 生成的 2D 点 u=(u1,u2)u=(u1​,u2​) 在 [0,1]2[0,1]2 上均匀分布。要让它按 GGX 分布生成 HH，需要对 GGX 的累积分布函数（CDF）做逆变换采样（Inverse Transform Sampling）。
+
+                    // Note: if (N == V), all of the microsurface normals are visible.
+                    SampleGGXDir(u, V, localToWorld, roughness, L, NdotL, NdotH, LdotH, true); // 得到在半球局部空间下上的入射方向
+
+                    if (NdotL <= 0) continue; // Note that some samples will have 0 contribution// 入射方向在半球以外, 没有
+                }
+
+                real mipLevel;
+
+                if (!prefilter) // BRDF importance sampling
+                {
+                    mipLevel = 0;
+                }
+                else // Prefiltered BRDF importance sampling
+                {
+                    // Use lower MIP-map levels for fetching samples with low probabilities
+                    // in order to reduce the variance.
+                    // Ref: http://http.developer.nvidia.com/GPUGems3/gpugems3_ch20.html
+                    //
+                    // - OmegaS: Solid angle associated with the sample
+                    // - OmegaP: Solid angle associated with the texel of the cubemap
+
+                    real omegaS;
+
+                    if (usePrecomputedSamples) // 预烘培 立体角， 立体角越大，覆盖的texel，对应的roughness/Miplevel越大。
+                    {
+                        omegaS = LOAD_TEXTURE2D(ggxIblSamples, uint2(i, index)).w;
+                    }
+                    else
+                    {
+                        // real PDF = D * NdotH * Jacobian, where Jacobian = 1 / (4 * LdotH).
+                        // Since (N == V), NdotH == LdotH.
+                        real pdf = 0.25 * D_GGX(NdotH, roughness); //NdotH 表示离波瓣中心的距离，离得越远，pdf越小，样本越稀疏，立体角覆盖氛围越大。
+                        // TODO: improve the accuracy of the sample's solid angle fit for GGX.
+                        omegaS    = rcp(sampleCount) * rcp(pdf);
+                    }
+
+                    // 'invOmegaP' is precomputed on CPU and provided as a parameter to the function.
+                    // real omegaP = FOUR_PI / (6.0 * cubemapWidth * cubemapWidth);
+                    const real mipBias = roughness;
+                    mipLevel = 0.5 * log2(omegaS * invOmegaP) + mipBias;
+                }
+
+                // TODO: use a Gaussian-like filter to generate the MIP pyramid.
+                real3 val = SAMPLE_TEXTURECUBE_LOD(tex, sampl, L, mipLevel).rgb;
+
+                // The goal of this function is to use Monte-Carlo integration to find
+                // X = Integral{Radiance(L) * CBSDF(L, N, V) dL} / Integral{CBSDF(L, N, V) dL}.
+                // Note: Integral{CBSDF(L, N, V) dL} is given by the FDG texture.
+                // CBSDF  = F * D * G * NdotL / (4 * NdotL * NdotV) = F * D * G / (4 * NdotV).
+                // PDF    = D * NdotH / (4 * LdotH).
+                // Weight = CBSDF / PDF = F * G * LdotH / (NdotV * NdotH).
+                // Since we perform filtering with the assumption that (V == N),
+                // (LdotH == NdotH) && (NdotV == 1) && (Weight == F * G).
+                // Therefore, after the Monte Carlo expansion of the integrals,
+                // X = Sum(Radiance(L) * Weight) / Sum(Weight) = Sum(Radiance(L) * F * G) / Sum(F * G).
+
+            #ifndef USE_KARIS_APPROXIMATION
+                // The choice of the Fresnel factor does not appear to affect the result.
+                real F = 1; // F_Schlick(F0, LdotH);
+                real G = V_SmithJointGGX(NdotL, NdotV, roughness, partLambdaV) * NdotL * NdotV; // 4 cancels out。 
+
+                lightInt += F * G * val; // 最后算出来的采样结果，还需要根据G进行权重计算。 “离波瓣中心多远” → 由 DD 的采样分布体现（远处样本少），不需要额外乘权重。 “这个方向物理上贡献多少” → 由 F⋅G 体现。G 不是“距离权重”，而是“微表面遮挡导致的可见性衰减”。
+                cbsdfInt += F * G;
+            #else
+                // Use the approximation from "Real Shading in Unreal Engine 4": Weight ≈ NdotL.
+                lightInt += NdotL * val; //使用NdotL替代 FG。 G 是根据 NdotL，NdotV，roughness 越大，权重值越小。
+                cbsdfInt += NdotL;
+            #endif
+            }
+
+            return real4(lightInt / cbsdfInt, 1.0);
+        }
+        ``` 
     - 误差： 高光技术拆分为两个可以预积分部分你的误差。（左边是表示各个方向光照的辐照度汇总, 右边是BRDF的汇总）， 和假设 N = R = V的误差。
     - BRDF项的积分结果可以使用近似函数代替。(模拟G*F)
   - 环境光遮蔽/AO: 
@@ -247,7 +366,7 @@
     - 逐物体的：根据角色中心点P在四面体中的重心坐标计算插值得到的球谐系数。 每个Mesh共用一个球谐戏数？
     - LPPV / Volume： 逐像素的： 在物体周围生成一个隐形的网格。每个网格点中都有一份插值好的球谐系数。 着色计算时，根据片元的世界坐标去网格中做3D 线性插值。
     - 漏光： 室内外分开烘焙，门口做过度处理。
-            设置室内外标记，记录权重值。 计算重心坐标时卡奥率权重值。 
+            设置室内外标记，记录权重值。 计算重心坐标时考虑权重值。 
   - Irradiance Volume / Volumetric Lightmap： 使用3D 纹理，思路类似Light probe/ LPPV： 不过使用二阶球谐系数来储存光照信息。
   - Precomputed Radiance Transfer(PRT):离线环境从每个Probe发射大量的射线，以预计算整个场景的Albedo Emission等色彩信息，同时再发出少量射线，将碰撞到的采样点的位置和法线储存下来，在运行时计算这些采样点的受光情况（天光，太阳光，局部光等），将这些光照信息乘到提前烘焙好的albedo，并叠加emission，最后得到一个看起来像那么回事的plausible的结果
     - 拆分色彩部分的计算和灯光可见度的计算： 

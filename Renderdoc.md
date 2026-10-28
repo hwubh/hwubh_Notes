@@ -175,4 +175,331 @@
     PFNGLSHADINGRATEQCOMPROC glShadingRateQCOM;
     ```
 
-- `renderdoc\driver\gl\wrappers\gl_framebuffer_funcs.cpp` 中: `WrappedOpenGL::FUNC(B)` 为 Wrapper函数的具体实现。 `WrappedOpenGL::Serialise_FUNC(B)` 为 Wrapper函数的具体实现。  以 glShadingRateEXT 为例,
+- `renderdoc\driver\gl\wrappers\gl_framebuffer_funcs.cpp` 中: `WrappedOpenGL::FUNC(B)` 为 Wrapper函数的具体实现， 在抓帧时调用。 `WrappedOpenGL::Serialise_FUNC(B)` 为抓帧和回放时负责写入，读取数据的序列化函数。  以 glShadingRateEXT 为例, 具体实现如下
+    ```cpp
+    template <typename SerialiserType>
+    bool WrappedOpenGL::Serialise_glShadingRateEXT(SerialiserType &ser, GLenum rate)
+    {
+    SERIALISE_ELEMENT(rate);
+    SERIALISE_CHECK_READ_ERRORS();
+
+    if(IsReplayingAndReading())
+    {
+        CheckReplayFunctionPresent(glShadingRateEXT);
+        GL.glShadingRateEXT(rate);
+        GetCtxData().m_LastShadingRateSource = 1;   // 回放时也要恢复"来源"
+    }
+    return true;
+    }
+
+    void WrappedOpenGL::glShadingRateEXT(GLenum rate)
+    {
+    SERIALISE_TIME_CALL(GL.glShadingRateEXT(rate)); // 真正调用驱动
+
+    GetCtxData().m_LastShadingRateSource = 1;        // 抓帧时记录来源
+
+        if(IsActiveCapturing(m_State))                   // 只有正在抓帧才写 chunk
+        {
+            USE_SCRATCH_SERIALISER(); // 全局(driver上唯一)的serialiser
+            SCOPED_SERIALISE_CHUNK(gl_CurChunk); // 在 serialiser 上开辟一个 glShadingRateEXT 类型的 chunk
+            Serialise_glShadingRateEXT(ser, rate); // 往这个 chunk 里写参数
+            GetContextRecord()->AddChunk(scope.Get()); // 把序列化数据封装成一个 Chunk 对象返回
+        }
+    }
+    ```
+- `renderdoc\driver\gl\gl_driver.cpp` 中: 在 `WrappedOpenGL::ProcessChunk`中添加VRS相关的分发，用于在回放时调用 `WrappedOpenGL::Serialise_FUNC(B)` 进行Chunk中记录的数据的解析，并根据解析的数据重新调用驱动的函数完成参数填充/绘制。
+    ```cpp
+    case GLChunk::glFramebufferShadingRateEXT:
+      return Serialise_glFramebufferShadingRateEXT(ser, eGL_NONE, eGL_NONE, 0, 0, 0, 0, 0);
+    case GLChunk::glShadingRateEXT:
+      return Serialise_glShadingRateEXT(ser, eGL_NONE);
+    case GLChunk::glShadingRateCombinerOpsEXT:
+      return Serialise_glShadingRateCombinerOpsEXT(ser, eGL_NONE, eGL_NONE);
+    case GLChunk::glGetFragmentShadingRatesEXT:
+      return Serialise_glGetFragmentShadingRatesEXT(ser, 0, 0, NULL, NULL);
+
+    case GLChunk::glShadingRateQCOM:
+      return Serialise_glShadingRateQCOM(ser, eGL_NONE);
+    ```
+    > 对应回放来说数据来源有三种: 记录（chunk + initial state）：
+    > 事实来源，记录在 Chunk 中。回答“应用当时做了什么”。
+    > 抓帧缓存：记录在 ContextData 中。事实来源的补充，回答“Context当前的状态”。 
+    > 回放查询：回放时执行完指令后，直接向驱动进行查询。回答“重放之后这个驱动认为状态是什么”，用于展示和校验。
+    这里 ContextData 中缓存了两个变量 `m_LastShadingRateSource` 和 `m_ShadingRateCombiners`。 使用的 ContextData的原因主要考虑几个因素:
+    - 抓帧开始前没 Chunk信息，需要 ContextData 用于记录当前context 上的数据。
+    - RenderDoc 自己会保存/恢复 GL 状态，但是很多操作（如 MASS resolve， overlay）会改变GL状态，这里就需要依赖 ContextData 记录的中缓存的信息进行恢复。
+    - 多Context，每个context 上的渲染状态不同。
+    > LastShadingRateSource 用于记录用了哪一种扩展， QCOM 记 2， EXT 记 1。
+- `renderdoc\driver\gl\gl_initstate.h`: 添加 FramebufferShadingRateAttachmentData 用于记录抓帧时glFramebufferShadingRateEXT 使用的参数和SRI。记录在 chunk 的 FramebufferInitialData 中。
+    ```cpp
+    struct FramebufferShadingRateAttachmentData
+    {
+    bool valid;
+    GLResource obj;
+    int32_t baseLayer;
+    int32_t numLayers;
+    int32_t texelWidth;
+    int32_t texelHeight;
+    };
+
+    DECLARE_REFLECTION_STRUCT(FramebufferShadingRateAttachmentData);
+
+    struct FramebufferInitialData
+    {
+    bool valid;
+    FramebufferAttachmentData Attachments[10];
+    GLenum DrawBuffers[8];
+    GLenum ReadBuffer;
+    FramebufferShadingRateAttachmentData shadingRateAttachment;
+
+    static const GLenum attachmentNames[10];
+    };
+    ```
+- `renderdoc\driver\gl\gl_initstate.cpp`: 添加 FramebufferShadingRateAttachmentData 的序列化方式。
+    ```cpp
+    template <typename SerialiserType>
+    void DoSerialise(SerialiserType &ser, FramebufferShadingRateAttachmentData &el)
+    {
+    SERIALISE_MEMBER(valid);
+    SERIALISE_MEMBER(obj);
+    SERIALISE_MEMBER(baseLayer);
+    SERIALISE_MEMBER(numLayers);
+    SERIALISE_MEMBER(texelWidth);
+    SERIALISE_MEMBER(texelHeight);
+    }
+
+    template <typename SerialiserType>
+    void DoSerialise(SerialiserType &ser, FramebufferInitialData &el)
+    {
+    SERIALISE_MEMBER(valid);
+    SERIALISE_MEMBER(Attachments);
+    SERIALISE_MEMBER(DrawBuffers);
+    SERIALISE_MEMBER(ReadBuffer);
+    if(ser.VersionAtLeast(0x24))
+        SERIALISE_MEMBER(shadingRateAttachment);
+    else if(ser.IsReading())
+        el.shadingRateAttachment = {};
+    }
+    ```
+    ```cpp
+    data.shadingRateAttachment = {};
+    if(HasExt[EXT_fragment_shading_rate_attachment])
+    {
+      GLint shadingRateType = eGL_NONE;
+      GLuint shadingRateTexture = 0;
+      GL.glGetNamedFramebufferAttachmentParameterivEXT(
+          res.name, eGL_SHADING_RATE_ATTACHMENT_EXT,
+          eGL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &shadingRateType);
+      if(shadingRateType == eGL_TEXTURE)
+      {
+        GL.glGetNamedFramebufferAttachmentParameterivEXT(
+            res.name, eGL_SHADING_RATE_ATTACHMENT_EXT,
+            eGL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, (GLint *)&shadingRateTexture);
+
+        data.shadingRateAttachment.valid = shadingRateTexture != 0;
+        data.shadingRateAttachment.obj = TextureRes(ctx, shadingRateTexture);
+
+        auto it = m_Driver->m_ShadingRateAttachments.find(id);
+        if(it != m_Driver->m_ShadingRateAttachments.end())
+        {
+          data.shadingRateAttachment.baseLayer = it->second.baseLayer;
+          data.shadingRateAttachment.numLayers = it->second.numLayers;
+          data.shadingRateAttachment.texelWidth = it->second.texelWidth;
+          data.shadingRateAttachment.texelHeight = it->second.texelHeight;
+        }
+      }
+    }
+    ```
+    ```cpp 
+    // ContextPrepare_InitialState 抓帧时写入
+    data.shadingRateAttachment = {};
+    if(HasExt[EXT_fragment_shading_rate_attachment])
+    {
+      GLint shadingRateType = eGL_NONE;
+      GLuint shadingRateTexture = 0;
+      GL.glGetNamedFramebufferAttachmentParameterivEXT(
+          res.name, eGL_SHADING_RATE_ATTACHMENT_EXT,
+          eGL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &shadingRateType);
+      if(shadingRateType == eGL_TEXTURE)
+      {
+        GL.glGetNamedFramebufferAttachmentParameterivEXT(
+            res.name, eGL_SHADING_RATE_ATTACHMENT_EXT,
+            eGL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, (GLint *)&shadingRateTexture);
+
+        data.shadingRateAttachment.valid = shadingRateTexture != 0;
+        data.shadingRateAttachment.obj = TextureRes(ctx, shadingRateTexture);
+
+        auto it = m_Driver->m_ShadingRateAttachments.find(id);
+        if(it != m_Driver->m_ShadingRateAttachments.end())
+        {
+          data.shadingRateAttachment.baseLayer = it->second.baseLayer;
+          data.shadingRateAttachment.numLayers = it->second.numLayers;
+          data.shadingRateAttachment.texelWidth = it->second.texelWidth;
+          data.shadingRateAttachment.texelHeight = it->second.texelHeight;
+        }
+      }
+    }
+    ```
+    ```cpp 
+    // Apply_InitialState 回放时apply
+    const ResourceId framebufferId = GetID(live);
+    if(data.shadingRateAttachment.valid &&
+        HasExt[EXT_fragment_shading_rate_attachment])
+    {
+    const FramebufferShadingRateAttachmentData &a = data.shadingRateAttachment;
+    GL.glFramebufferShadingRateEXT(
+        eGL_DRAW_FRAMEBUFFER, eGL_SHADING_RATE_ATTACHMENT_EXT, a.obj.name, a.baseLayer,
+        a.numLayers, a.texelWidth, a.texelHeight);
+    m_Driver->m_ShadingRateAttachments[framebufferId] = {
+        GetID(a.obj), a.baseLayer, a.numLayers, a.texelWidth, a.texelHeight};
+    }
+    else
+    {
+    m_Driver->m_ShadingRateAttachments.erase(framebufferId);
+    }
+    ```
+- `renderdoc/driver/gl/gl_renderstate.cpp`: 向 GLRenderState （GL 状态快照） 添加 VRS 相关参数的字段。 抓帧时使用 FetchState记录， 回放时使用ApplyState应用。 这里需要注意的是，在使用EXT_fragment_shading_rate/QCOM_shading_rate 这两个不同的扩展时，记录的参数字段不同。
+    ```cpp
+    // FetchState
+    if(HasExt[EXT_fragment_shading_rate])
+    {
+        GL.glGetIntegerv(eGL_SHADING_RATE_EXT, (GLint *)&ShadingRate);
+        ShadingRateCombinerOp[0] = driver->GetCtxData().m_ShadingRateCombiners[0];
+        ShadingRateCombinerOp[1] = driver->GetCtxData().m_ShadingRateCombiners[1];
+    }
+    else
+    {
+        ShadingRate = eGL_SHADING_RATE_1X1_PIXELS_EXT;
+        ShadingRateCombinerOp[0] = eGL_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_EXT;
+        ShadingRateCombinerOp[1] = eGL_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_EXT;
+    }
+
+    if(HasExt[QCOM_shading_rate])
+    {
+        GL.glGetIntegerv(eGL_SHADING_RATE_QCOM, (GLint *)&ShadingRateQCOM);
+        ShadingRatePreserveAspectQCOM =
+            GL.glIsEnabled(eGL_SHADING_RATE_PRESERVE_ASPECT_RATIO_QCOM) == GL_TRUE;
+    }
+    else
+    {
+        ShadingRateQCOM = eGL_SHADING_RATE_1X1_PIXELS_QCOM;
+        ShadingRatePreserveAspectQCOM = false;
+    }
+
+    LastShadingRateSource = driver->GetCtxData().m_LastShadingRateSource;
+    if(LastShadingRateSource == 0)
+    {
+        if(HasExt[QCOM_shading_rate] && !HasExt[EXT_fragment_shading_rate])
+        LastShadingRateSource = 2;
+        else if(HasExt[EXT_fragment_shading_rate])
+        LastShadingRateSource = 1;
+    }
+    ```
+    ```cpp
+    // ApplyState
+    if(HasExt[QCOM_shading_rate] && GL.glShadingRateQCOM && LastShadingRateSource != 2)
+        GL.glShadingRateQCOM(ShadingRateQCOM);
+
+    if(HasExt[EXT_fragment_shading_rate])
+    {
+        if(GL.glShadingRateEXT && !(LastShadingRateSource == 2 && !HasExt[QCOM_shading_rate]))
+        GL.glShadingRateEXT(ShadingRate);
+        if(GL.glShadingRateCombinerOpsEXT)
+        {
+        GL.glShadingRateCombinerOpsEXT(ShadingRateCombinerOp[0], ShadingRateCombinerOp[1]);
+        driver->GetCtxData().m_ShadingRateCombiners[0] = ShadingRateCombinerOp[0];
+        driver->GetCtxData().m_ShadingRateCombiners[1] = ShadingRateCombinerOp[1];
+        }
+    }
+
+    if(HasExt[QCOM_shading_rate])
+    {
+        if(GL.glShadingRateQCOM && LastShadingRateSource == 2)
+        GL.glShadingRateQCOM(ShadingRateQCOM);
+        if(ShadingRatePreserveAspectQCOM)
+        GL.glEnable(eGL_SHADING_RATE_PRESERVE_ASPECT_RATIO_QCOM);
+        else
+        GL.glDisable(eGL_SHADING_RATE_PRESERVE_ASPECT_RATIO_QCOM);
+    }
+
+    driver->GetCtxData().m_LastShadingRateSource = LastShadingRateSource;
+    ```
+    ```cpp
+    // Clear
+    if(ser.VersionAtLeast(0x24))
+    {
+        ser.Serialise("GL_SHADING_RATE_EXT"_lit, el.ShadingRate);
+        ser.Serialise("GL_SHADING_RATE_COMBINER_OP_EXT"_lit, el.ShadingRateCombinerOp);
+    }
+    else if(ser.IsReading())
+    {
+        el.ShadingRate = eGL_SHADING_RATE_1X1_PIXELS_EXT;
+        el.ShadingRateCombinerOp[0] = eGL_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_EXT;
+        el.ShadingRateCombinerOp[1] = eGL_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_EXT;
+    }
+
+    if(ser.VersionAtLeast(0x25))
+    {
+        ser.Serialise("GL_SHADING_RATE_QCOM"_lit, el.ShadingRateQCOM);
+        ser.Serialise("GL_SHADING_RATE_PRESERVE_ASPECT_RATIO_QCOM"_lit,
+                    el.ShadingRatePreserveAspectQCOM);
+        ser.Serialise("GL_SHADING_RATE_SOURCE"_lit, el.LastShadingRateSource);
+    }
+    else if(ser.IsReading())
+    {
+        el.ShadingRateQCOM = eGL_SHADING_RATE_1X1_PIXELS_QCOM;
+        el.ShadingRatePreserveAspectQCOM = false;
+        el.LastShadingRateSource = 0;
+    }
+    ```
+- `renderdoc/driver/gl/gl_replay.cpp` : 将抓帧获取的信息汇总，翻译后写入 GLPipe （记录整个管线状态，包含渲染参数，FBO和各种资源的引用） 中，将地址（指针）供 UI 线程进行读取。 GLPipe Renderoc维护的一套GL/GLES统一的结构。 以便同时服务本地 UI、Python、远程 replay 和离线导出等功能。
+- `renderdoc/api/replay/gl_pipestate.h`： 修改 GLPipe 的结构（RasterizerState/FBO）
+    ```cpp
+    // GLPipe::RasterizerState
+    rdcpair<uint32_t, uint32_t> shadingRate = {1, 1};
+    bool shadingRateQCOM = false;
+    bool shadingRatePreserveAspectRatio = false;
+    rdcpair<ShadingRateCombiner, ShadingRateCombiner> shadingRateCombiners =
+        {ShadingRateCombiner::Keep, ShadingRateCombiner::Keep};
+
+    // GLPipe::FBO
+    Descriptor shadingRateAttachment;
+    rdcpair<uint32_t, uint32_t> shadingRateTexelSize = {1, 1};
+    ```
+- `renderdoc/replay/renderdoc_serialise.inl` : 修改序列化的字段和结构体的大小，与 GLPipe 的结构保持一致。 用于从设备端(Android/QNX)返回数据到主机上。
+- `qrenderdoc\Windows\PipelineState\GLPipelineStateViewer.ui` : 在 Rasterizer 分组第 4 行加两个 label，`shadingRate` 和 `shadingRateCombiners`. 
+- `qrenderdoc\Windows\PipelineState\GLPipelineStateViewer.cpp`: 在 `clearState()`中设置UI界面上的默认值。 `setState()` 上根据使用的扩展，填充返回需要的渲染参数。FBO的attachments队列中添加SRI，显示sri的 类型、尺寸、格式、TileSize。
+- `renderdoc\driver\gl\gl_hooks.cpp`, `renderdoc\driver\gl\egl_hooks.cpp`: 对 Hook 的 VRS相关函数的 next_gpa 进行保护，避免引用到hook函数自身。分别在初始化跳过，运行时，事后校验等方式进行保护。
+
+完整数据流总结
+
+```
+【抓帧】
+App: glShadingRateEXT(4x4)
+  → GL.glShadingRateEXT（真实调用）
+  → ContextData.m_LastShadingRateSource = 1
+  → chunk: Serialise_glShadingRateEXT(rate)
+
+App: glFramebufferShadingRateEXT(FBO, SR_ATTACHMENT, tex, 0, 1, 4, 4)
+  → 真实调用
+  → m_ShadingRateAttachments[fbo] = {tex, 0, 1, 4, 4}
+  → chunk + MarkDirtyResource(tex) + MarkFBOReferenced
+
+每 draw 快照
+  → GLRenderState.FetchState()
+      ShadingRate / Combiners / QCOM / Source
+  → 序列化进帧数据
+
+【回放】
+初始状态 → Apply_InitialState → glFramebufferShadingRateEXT + 重建 map
+每 draw   → ApplyState → 按 Source 设置 EXT 或 QCOM，恢复 combiner 缓存
+chunk     → Serialise_xxx → 再调用真实 GL（保证与抓帧顺序一致）
+
+【展示】
+SavePipelineState()
+  → 读 GLRenderState → 映射成 (x,y) 和 ShadingRateCombiner
+  → 查 FBO attachment + map 补 texel size
+  → GLPipe::State
+  → GLPipelineStateViewer 文本 + 帧缓冲树节点
+  → （远程时）经 ReplayProxy 序列化传到主机
+```
