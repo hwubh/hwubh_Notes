@@ -16,13 +16,17 @@
 - GL 的跨帧行为正确吗？
 - GL SetCombinerOps/setPipeShadingRate 与 per draw VRS的冲突问题
 - HLSL 中 RW R8_UINT的问题
-- rrm independent stencil texture 
-- VRS in XBOX
+<!-- - rrm independent stencil texture  -->
+<!-- - VRS in XBOX -->
 - Rendering Feature Index
 - rasterization rate map caps 可能不准/
 - FrameDebugger tileSize没显示
 - ShadingRateTileSize 改为写明 = 8， = 116， = 32；
 - VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR 没开启
+- AlphaTest + VRS需要慎重，要注意避免discard掉要保留的片元。
+- 7196731e20ce54d3f504afee7907fc4a7cc22822 多余的修改
+- Vulkan 中给SRI赋值大于等于255的取值会导致未定义行为（黑屏）
+- Coarse pixel shading point out of render target. -》 如果作为uv使用 texture.load 读取贴图数据，可能返回未定义值，导致渲染错误。  -> 可以对X/Y =1 的边缘位置，进行钳制。如果XY方向像素没法被4整除，则XY方向上着色频率限制为1/2；如果没法被2整除，则限制在2. 
 ------------------
 - 为什么shading rate 和 combinerops的设置分开写？ ： OpenGLES中是分开的。
 ------------------
@@ -154,6 +158,28 @@ DX12 上可以使用PIX来查看 Shading Rate情况，不过需要使用DXIL(HLS
 DX12: 打包后kRenderCommand_DrawRendererList 指令在 kRenderCommand_SetShadingRateImageEnable 之后 -》 怀疑是context.DrawRenderers 不遵从commandbuffer的队列。 -》 实际上DrawRenderers有自己的一个队列，与context.ExecuteCommandBuffer的队列进行区分。 Unity在上层有抽象了一个m_Commands来进行管理。（比如每次context.ExecuteCommandBuffer或 context.DrawRenderers都会往m_Commands队列中添加个对象。）
 
 放在Before里设置Image 好吗？
+
+理论上SRI图不应该有 ALLOW_RENDER_TARGET ，换言之，只能用在compute shader中。
+
+“
+When creating the screen-space image, these flags are permitted.
+
+    NONE
+    ALLOW_UNORDERED_ACCESS
+    DENY_SHADER_RESOURCE
+
+These flags are not permitted.
+
+    ALLOW_RENDER_TARGET
+    ALLOW_DEPTH_STENCIL
+    ALLOW_CROSS_ADAPTER
+    ALLOW_SIMULTANEOUS_ACCESS
+    VIDEO_DECODE_REFERENCE_ONLY
+”
+
+DX12 的SRI图不一定要完全贴合最理想的情况。 过大时，超出的部分会被忽略。过小时，未覆盖的区域默认为1x1
+
+要求支持Option6。 部分能力要求Option10
 --------------------------
 OpenGLES上： 
 GfxDeviceGLES::SetRenderTargetsImpl()
@@ -274,9 +300,215 @@ Image-based VRS (Tier 2 VRS):
 
 --------------------
 - https://docs.vulkan.org/features/latest/features/proposals/VK_KHR_fragment_shading_rate.html#_per_draw_state
+--------------------
+✦ 好问题。这两个 barrier 类型不同，作用完全不同。我基于 D3D12 规范和引擎源码解释。
+
+  两个 barrier 的本质区别
+
+  Barrier [0]：TRANSITION（状态转换）
+
+   Type: D3D12_RESOURCE_BARRIER_TYPE_TRANSITION
+   StateBefore: UNORDERED_ACCESS
+   StateAfter: SHADING_RATE_SOURCE
+
+  作用：把资源从一种访问用途转换到另一种。它告诉 GPU："这个资源之前被当作 UAV 用，现在要当作 shading rate source 用"。
+
+  为什么需要：D3D12 要求资源在 GPU 上以不同用途访问前，必须显式声明状态转换。UNORDERED_ACCESS 和 SHADING_RATE_SOURCE
+  是两种不同的资源状态，转换必须声明。
+
+  关键：它改变资源状态，是"状态机"层面的转换。
+
+  Barrier [2]：UAV（无序访问同步）
+
+  类型：D3D12_RESOURCE_BARRIER_TYPE_UAV
+
+  作用：不做状态转换，只做内存同步。它确保之前所有对该资源的 UAV 写入（compute dispatch）完成，后续读取能看到完整数据。
+
+  为什么需要：GPU 上 compute 写入和后续读取是异步的。如果没有 UAV barrier，后续读取可能读到未写完的数据（数据竞争）。
+
+  关键点：它不改变资源状态，只做执行顺序/内存可见性同步。
+
+  ---
+
+  为什么内容差别大
+
+
+  ┌────────────────────────┬─────────────────────────────────────────────────┬────────────────────┐
+  │                        │             Barrier [1] TRANSITION              │  Barrier [2] UAV   │
+  ├────────────────────────┼─────────────────────────────────────────────────┼────────────────────┤
+  │ 类型                   │ TRANSITION                                      │ UAV                │
+  ├────────────────────────┼─────────────────────────────────────────────────┼────────────────────┤
+  │ 作用                   │ 状态转换                                        │ 内存同步           │
+  ├────────────────────────┼─────────────────────────────────────────────────┼────────────────────┤
+  │ 改变状态吗             │ 是（UAV → SHADING_RATE_SOURCE）                 │ 否                 │
+  ├────────────────────────┼─────────────────────────────────────────────────┼────────────────────┤
+  │ 需要 StateBefore/After │ 是                                              │ 否（没有状态概念） │
+  ├────────────────────────┼─────────────────────────────────────────────────┼────────────────────┤
+  │ 同步什么               │ 资源访问用途                                    │ UAV 写入完成       │
+  ├────────────────────────┼─────────────────────────────────────────────────┼────────────────────┤
+  │ 字段                   │ Transition.pResource + StateBefore + StateAfter │ UAV.pResource      │
+  └────────────────────────┴─────────────────────────────────────────────────┴────────────────────┘
+
+  Barrier [1] 有 StateBefore/StateAfter，因为它是状态转换，需要声明"从哪到哪"。
+
+  Barrier [2] 只有 pResource，没有状态字段，因为它是纯同步，不涉及状态转换。
+
+  ---
+
+  为什么两个都要
+
+  你的截帧显示两个 barrier 都作用于 _VRS_SRI，这是正确且必需的：
+
+   compute 写入 SRI（UAV 状态）
+     ↓
+   [Barrier 2: UAV]  ← 确保 compute 写入完成（内存同步）
+     ↓
+   [Barrier 1: TRANSITION]  ← UAV → SHADING_RATE_SOURCE（状态转换）
+     ↓
+   RSSetShadingRateImage(sri)  ← 此时 SRI 才能被光栅化正确读取
+
+   - Barrier 2（UAV）：保证数据完整（compute 写完）
+   - Barrier 1（TRANSITION）：保证状态正确（UAV → SHADING_RATE_SOURCE）
+
+  缺一不可：
+   - 只有 UAV barrier → 数据同步了，但状态还是 UAV，光栅化读取状态不匹配 → 未定义行为
+   - 只有 TRANSITION → 状态对了，但 compute 可能没写完 → 读到脏数据
+
+  ---
+
+  结论
+
+  两个 barrier 内容差别大是因为它们类型不同、作用不同：
+
+   - Barrier [1] TRANSITION：状态转换（UAV → SHADING_RATE_SOURCE），有 StateBefore/StateAfter
+   - Barrier [2] UAV：内存同步（确保 compute 写入完成），只有 pResource
+
+  两者都是必需的，顺序是 UAV barrier 在前，TRANSITION 在后（先同步数据，再转换状态）。你的截帧显示的顺序正确，方案正确。
 
 
 ---------------------
+
+
+  --------------------
+     PostProcessPass.Render() 开始
+   │
+   ├─ source = renderer.cameraColorTargetHandle     ← MSAA back buffer (渲染结果)
+   ├─ destination = renderer.GetCameraColorFrontBuffer(cmd)  ← front buffer
+   │
+   ├─ if (amountOfPassesRemaining > 0)              ← 有后处理效果要执行?
+   │     renderer.EnableSwapBufferMSAA(false)        ← 关闭 front buffer 的 MSAA
+   │                                                  front buffer 变成非 MSAA
+   │
+   ├─ 第一个 Blitter.BlitCameraTexture(source → destination)
+   │     ↑ MSAA back buffer → 非 MSAA front buffer
+   │     ↑ 这就是 resolve！硬件在 graphics blit 时自动 resolve
+   │
+   ├─ 后续效果 (DOF, Bloom, MotionBlur 等)
+   │     全部在非 MSAA buffer 之间 ping-pong
+   │
+   ├─ Uber Post Pass (色彩分级、色调映射等)
+   │     if (!m_HasFinalPass)
+   │         renderer.EnableSwapBufferMSAA(true)     ← 重新开启 MSAA
+   │         destination = GetCameraColorFrontBuffer ← front buffer 变回 MSAA
+   │     Blitter.BlitCameraTexture(source → destination)  ← 非 MSAA → MSAA
+   │     renderer.ConfigureCameraColorTarget(destination)  ← 更新 handle 指向 MSAA 目标
+   │     Swap(ref renderer)
+   │
+   └─ PostProcessPass 结束
+      cameraColorTargetHandle → MSAA 纹理
+
+
+----------------------
+着色计算的评估点如果落在三角形外, 怎么处理？ 
+
+针对 **VRS 4×4 粗糙像素中心不在三角形内部** 的情况，关于“强制外推”与“评估点移动”的处理方式，核心总结如下：
+
+### 1. 统一的默认行为：强制外推（不移动评估点）
+
+* **规则**：所有图形 API（DirectX 12、Vulkan、Metal）和 GPU 厂商（NVIDIA、AMD、Qualcomm、ARM 等）默认均采用 **强制外推（Extrapolation）**。
+* **机制**：着色评估点**固定在 4×4 的几何中心不发生改变**。即使该中心落在了三角形外部，GPU 也会强行将外部坐标代入三角形平面方程计算属性。
+* **影响**：可能导致 UV 坐标越界（[0,1] 以外）、透视插值除以零产生 `NaN`、法线异常或边缘画面拉伸黑边。
+* **设计依据**：默认不移动评估点可规避光栅化阶段对每个粗糙像素逐一做 Coverage Mask 判断带来的硬件电路开销与延迟。
+
+---
+
+### 2. 条件触发的修正机制：移动评估点（质心插值）
+
+* **规则**：所有主流 API 和硬件厂商均**支持**移动评估点，但必须通过开发者在 Shader 中使用 **`centroid`** 关键字（或显式插值函数）来主动触发。
+* **机制**：当开启 `centroid` 时，GPU 硬件（如 Attribute Interpolator / SPI）会读取 4×4 的 16-bit Coverage Mask，检测到中心未覆盖后，**将着色评估点偏移移动至三角形内部被覆盖的子像素/质心位置**。
+* **影响**：属性值被限定在三角形内部的合法范围内，彻底消除外推瑕疵。
+
+---
+
+### 3. 各 GPU 厂商的底层硬件防护差异
+
+| 硬件厂商 | 默认行为 | 开启 `centroid` 时的评估点移动 | 额外的硬件防护/降级机制 |
+| --- | --- | --- | --- |
+| **NVIDIA** <br>
+
+<br>*(Turing 及更新)* | 强制外推 | 硬件提取 Coverage Mask 中最靠近的有效位，重定位评估点 | 支持 Rate Reduction（率降低），极小三角形边缘自动将 4×4 降级为 2×2/1×1。 |
+| **AMD** <br>
+
+<br>*(RDNA 2/3)* | 强制外推 | 依赖 SPI 阶段的重心坐标引擎计算局部质心 | 硬件带有数值 Clamping 保护，限制极端外推导致的 $1/w$ 极值溢出。 |
+| **Qualcomm** <br>
+
+<br>*(Adreno)* | 强制外推 | 选取 Tile 内部被覆盖的子像素节点作为评估点 | 驱动可能对复杂纹理采样隐式补全 Centroid，或将边缘强行裁切回高精度渲染，防止 UV 越界造成高成本 Cache Miss。 |
+| **ARM Mali** <br>
+
+<br>*(Valhall 等)* | 强制外推 | 依靠 Fragment Frontend 提取第一个 Hit 的 Quad 点作为基准点 | 针对 Tile 架构保护带宽与纹理缓存稳定性。 |
+
+官方图形 API 规范与文档 (API Specifications & Specs)
+
+    Microsoft DirectX 12 VRS 官方技术文档
+
+        文档: Direct3D 12 Spec: Variable-Rate Shading (VRS)
+
+        关键参考章节: Centroid Interpolation, HLSL Attribute Evaluation Operations (SM 6.4)
+
+        核心点: 明确规定默认模式下使用 4×4 几何中心插值；当使用 centroid 限定符或 SM6.4 的 EvaluateAttributeCentroid() 时，评估点被定义为“粗糙像素区域内所有被覆盖采样点（Covered Samples）的质心”。
+
+    Khronos Vulkan 官方扩展规范
+
+        规范: VK_KHR_fragment_shading_rate & VK_NV_shading_rate_image
+
+        关键参考章节: How do centroid-sampled variables work with fragments larger than one pixel? (Issues #15 & #18)
+
+        核心点: 规范解答中指出，针对多像素 Fragment，默认评估点为 Fragment 中心（可能引发 Extrapolation）。若要解决粗糙像素边缘属性外推瑕疵，必须在 SPIR-V 中对属性标记 Centroid 装饰。
+
+    Apple Metal 开发者文档
+
+        文档: Metal Shading Language Specification (Section 5.2.3: Interpolation Attributes)
+
+        核心点: 规定了 MSL 在使用 Variable Rasterization Rate (VRR) 时，对顶点属性插值限定符 [[centroid_center]] / [[centroid_perspective]] 的评估点定位规则。
+
+2. GPU 厂商硬件架构白皮书与技术指南 (Hardware Whitepapers)
+
+    NVIDIA Developer: Turing Architecture Whitepaper & VRS Technical Guide
+
+        白皮书: NVIDIA Turing GPU Architecture Whitepaper (Section: Turing Variable Rate Shading)
+
+        技术博客: NVIDIA Developer Blog: Turing Variable Rate Shading (VRS) In Practice
+
+        核心点: 详细解释了硬件级的 Sample Location Selection 规则、粗糙像素 Coverage Mask 的解析逻辑，以及针对边缘极小三角形的 Rate Reduction 动态降级防护策略。
+
+    AMD RDNA Architecture & ISA Manuals
+
+        文档: AMD RDNA2/RDNA3 Instruction Set Architecture (ISA) & Technical Docs
+
+        核心点: 阐述了 SPI (Shader Processor Input) 硬件单元在处理 Barycentric Coordinates（重心坐标）时的算术机制，以及 SPI_INTERP_CONTROL 寄存器对 Centroid 插值与数据 Clamping 的保护逻辑。
+
+    Qualcomm Adreno GPU Documentation
+
+        技术指南: Qualcomm Snapdragon Profiler & VRS Developer Guide
+
+        核心点: 说明了 Tile-Based Deferred Rendering (TBDR) 架构下，4×4 粗糙像素中心失配对 Texture Cache Miss 的影响，以及驱动层在 Binning 阶段针对边缘像素进行 Sub-pixel Centroid 重定位或 Shading Rate Fallback 的处理策略。
+
+https://developer.nvidia.com/blog/advanced-api-performance-variable-rate-shading/
+https://patentimages.storage.googleapis.com/d5/69/d4/bb280fb047bd51/US20200202605A1.pdf#3#1
+https://hackage-content.haskell.org/package/vulkan-3.27/docs/Vulkan-Extensions-VK_NV_shading_rate_image.html#:~:text=RESOLVED%20For%20single%2Dpixel%20fragments%2C%20fragment%20shader%20inputs,lead%20to%20overly%20bright%20or%20dark%20pixels.
+
+
+----------------------
 RRM: 
 - https://zhuanlan.zhihu.com/p/586856514
 - https://zhuanlan.zhihu.com/p/587988966
@@ -337,3 +569,11 @@ VRS:
 - https://github.com/KhronosGroup/GLSL/blob/main/extensions/ext/GLSL_EXT_fragment_shading_rate.txt
 - https://developer.mediatek.com/VariableRateShading/6554775458a7392014e51c52.html
 - https://developer.download.nvidia.com/video/gputechconf/gtc/2019/presentation/s9209-advances-in-real-time-automotive-visualisation.pdf
+- GDC2022-VALAR-MD06-ATL11-2_v2_Adam_Marissa (提到了wave intrinsic 的处理。 目前测试下来在DX12 和 Vulkan上可用)
+
+
+
+------------------
+- 植被开启VRS 后闪烁，颜色不对: AlphaTest + VRS需要慎重，要注意避免discard掉要保留的片元。 此外有利用深度图进行判断等效果也会因为着色点偏移的问题导致效果问题。
+- 开启VRS 后边缘变黑: 开启VRS 后着色点落到了RenderTarget之外，使用Texture.Load 读取贴图数据时，因为UV超出了 0~1 的范围，导致Texture.Load返回值默认为0. 对靠近X， Y = 1 边缘做了处理: 根据 /4， /2存在的余数的情况分布做了处理。(能被4整除才能采用x4 着色率，能被2整除才能采用x2着色率)。
+- 

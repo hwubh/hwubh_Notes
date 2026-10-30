@@ -205,6 +205,50 @@ TBDR
 - RT Compression: 
   - UBWC: 
 
+- helper lane and Quad: https://zhuanlan.zhihu.com/p/1980020382640658379 https://www.intel.cn/content/dam/develop/external/us/en/documents/coarse-pixel-shading-516367.pdf https://www.khronos.org/blog/khronos-releases-maximal-reconvergence-and-quad-control-extensions-for-vulkan-and-spir-v https://docs.vulkan.org/spec/latest/chapters/shaders.html#shaders-derivative-operations https://docs.vulkan.org/spec/latest/chapters/shaders.html#shaders-quad-operations https://microsoft.github.io/DirectX-Specs/d3d/VariableRateShading.html
+
+**这三个 helper 会执行 Shader 来提供求导所需的邻居数据，但不会输出可见像素。开启 VRS 2×2 后，helper 开销仍可能存在；对于只覆盖一个像素的小三角形，不能期待它把 4 次着色直接变成 1 次。**
+
+下面假设没有 MSAA，像素通过深度测试，且 Shader 使用纹理隐式 LOD 或 `ddx/ddy`。
+
+**1. 三个 helper 实际在做什么？**
+
+普通 1×1 shading 下，一个 quad 可以表示为：
+
+```text
+P H
+H H
+
+P：三角形覆盖的像素对应的 invocation
+H：helper invocation
+```
+
+求导需要邻居的**同一个表达式的值**。例如：
+
+```hlsl
+float2 uv = ComputeUV(input);
+float4 c = tex.Sample(samplerState, uv);
+```
+
+为了确定纹理 LOD 和过滤所需的梯度，helper 需要计算自己位置的 `uv`，包括 `ComputeUV` 的相关运算。对于 `ddx(f(...))`，需要的是邻居计算出的 `f(...)`，因此 helper 并非只执行一条“求导指令”，可能需要执行很长的计算链，甚至涉及纹理读取。Vulkan 规范明确要求：执行导数操作时，必要时启动额外 helper；隐式 LOD 采样的语义也包含坐标求导。[Vulkan：Derivative Operations](https://docs.vulkan.org/spec/latest/chapters/shaders.html#shaders-derivative-operations)
+
+它们执行的是当前三角形的 Shader，不是在替相邻三角形着色；其结果不会写入 framebuffer，外部存储写入和原子操作也不能产生正常可见的副作用。[Vulkan：Helper Invocations](https://docs.vulkan.org/spec/latest/chapters/shaders.html#shaders-helper-invocations)
+
+**2. 哪些性能消耗没有直接贡献到画面？**
+
+从上述执行模型可以推导出：
+
+| 开销 | helper 的影响 |
+|---|---|
+| ALU 运算 | 计算插值后的表达式、UV 变换等，消耗执行资源 |
+| 纹理与读取 | 执行到相关指令时，可能消耗纹理吞吐和缓存资源；不等于每次都访问显存 |
+| SIMD lane 利用率 | 一个 quad 只有一个 invocation 输出画面，其他 lane 用于辅助计算 |
+| 颜色、深度输出 | helper 不会像三个真实片元一样额外写出结果 |
+
+所以，“1 个有效 invocation + 3 个 helper”可以描述为 **25% 的输出 lane 利用率**，但**不能直接换算成 GPU 时间变成 4 倍或显存带宽变成 4 倍**。
+
+这些工作对于当前求导机制有用，只是没有直接生成可见像素。也不能一概认为三个 helper 都完整执行到 Shader 结束：不再需要它们时，实现可能提前终止，具体取决于编译器、硬件及 Shader 语义。[Khronos 对 helper 生命周期的说明](https://www.khronos.org/blog/khronos-releases-maximal-reconvergence-and-quad-control-extensions-for-vulkan-and-spir-v)
+
 - 参考资料:
   https://zhuanlan.zhihu.com/p/407976368
   https://www.zhihu.com/search?type=content&q=LRZ%20pass
