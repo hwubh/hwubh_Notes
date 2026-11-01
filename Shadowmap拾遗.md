@@ -78,6 +78,9 @@
 悬崖（XY方向的投影地形）: 
 - FryCry5： tri plane projection，如有必要的话做blend来处理。 使用随机混合来降低使用不同tiling系数的sample次数。"stochastic cliff shading": 使用有噪点的alpha test来替代alpha blend，本质上是一个screen door effect
 
+抖动：
+- 考虑用时域的方式来压低？
+
 ---------------
 - https://zhuanlan.zhihu.com/p/1986214133645984827
 - https://zhuanlan.zhihu.com/p/2030698173631554239
