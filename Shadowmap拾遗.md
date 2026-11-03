@@ -90,6 +90,19 @@
 - 处理漏光
 - 增加细节阴影。其实有点像是SSAO了？
 
+# 原神中优化阴影的一些技巧：
+- 使用Poisson disc（泊松分布算法）的soft shadow（软阴影）
+- 分为8级cascade，后面四级不每帧更新
+- 1/4 * 1/4 大小的Mask标注半影区域，只有半影区域做软阴影。 通过在4*4 coarse pixel中选取几个点判断是否有阴影。Mask会有模糊以弥补判断半阴影时欠采样的问题。
+- Local light shadow:
+  - offline 生成 全场景的静态local light shadowmap，并进行压缩
+  - 运行时使用compute shader进行解压
+  - 压缩方式: 1024*1024 shadowmap分为32\*32个tile，每个tile分为16\*16个2\*2的coarse pxiel。 
+    - 每个2\*2块如果是落在同一平面上，则可以使用深度平面方程\[z(x,y)=ax+by+c\]表示。
+    - 每个2\*2块如果被不同平面分割，则使用压缩浮点数的方式压缩四个深度值。
+    - 每个Tile使用Quad tile，合并同一平面上的coarse pixel（可以共用深度平面方程？）
+
+https://zhuanlan.zhihu.com/p/56317663
 ---------------
 - https://zhuanlan.zhihu.com/p/1986214133645984827
 - https://zhuanlan.zhihu.com/p/2030698173631554239
