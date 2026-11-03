@@ -44,6 +44,10 @@ https://zhuanlan.zhihu.com/p/469436345
 #pragma require wavebasic quadshuffle
 -----------------------------------
 
+
+# 实测下来原因应该时DXC优化的缘故，将ddx，ddy操作，移动到了if（lane0）内，导致helper pixel无法invocation。
+https://microsoft.github.io/DirectX-Specs/d3d/archive/D3D11_3_FunctionalSpec.htm#16.8%20Interaction%20of%20Varying%20Flow%20Control%20With%20Screen%20Derivatives
+https://github.com/microsoft/DirectXShaderCompiler/pull/8707 中通过给 “derivative operations” 标记 “convergent” 处理了这个问题。
 ## ddx/ddy 在全屏 Blit Pass 中失效的实测分析
 
 ### 背景

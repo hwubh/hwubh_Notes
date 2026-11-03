@@ -40,22 +40,22 @@
 - 在渲染画面之前预先以低精度（1/16、 1/8或更低）渲染场景，用Virtual uv（世界空间坐标）得到对应的VT上的tile，即Indirection Texture的uv。同时根据uv梯度计算出对应的mipmap level，与physical uv offset（physcial page uv 坐标/ physical page size），存入对应的Indirection Texture的Tile的RGB通道中中。 
 ![![enter image description here](tflpictures202306tapd_30659243_1687335171_649.png)](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/!%5Benter%20image%20description%20here%5D(tflpictures202306tapd_30659243_1687335171_649.png).png)
 - 若该texel的对应的tile未加载，则向CPU发出指令，从内存/磁盘中将tile加载（绘制）入physical texture上。 绘制时将virtual uv采样indirection texture（因为Indirection Texture与VT是一一对应且在空间上是连续的） 得到 physical uv，采样physical texture 输出颜色值。
-####具体实现：
+#### 具体实现：
 - 1: 将12288 * 12288 的整个大世界分割为 9216张  128 * 128的贴图（Page）， 以双倍精度提前烘焙，以 48 * 48  ETC 的方式压缩（1/6的压缩比），存入包体中。（大概需要270 MB(四层LOD)）.
 
-- 2: 将内存中常驻一张 96 * 96 * 24/36 bit 的 Indirection Texture，每个texel 对应 Virtual Texture的一个Page， 前三个通道分别存储 physical OffsetX, physical OffsetY, VT Mip map level。 以及一张 3*3*128 的physical map 用于储存加载的贴图。
+- 2: 将内存中常驻一张 96 * 96 * 24/36 bit 的 Indirection Texture，每个texel 对应 Virtual Texture的一个Page， 前三个通道分别存储 physical OffsetX, physical OffsetY, VT Mip map level。 以及一张 3\*3\*128 的physical map 用于储存加载的贴图。
 - 3: 在渲染阴影之前预先渲染场景（1/16 精度，因为只渲染地形，精度可以低点），用Virtual uv（世界空间坐标？）得到对应的VT上的tile，即Indirection Texture的uv。同时根据uv梯度计算出对应的mipmap level，与physical uv offset，存入对应的Indirection Texture的Tile中。 若该texel的对应的tile未加载，则向CPU发出指令，从内存/磁盘中将tile加载（绘制）入physical texture上。 绘制时将uv采样indirection texture 得到 physical uv，采样physical texture 输出颜色值。
 - 问题：1：占用包体大，2; 精度不足。
 
-####Procedural VT
+#### Procedural VT
 - 因为整体离线烘焙大世界会导致包体，与Indirection Texture过于膨大（VT page过大会导致精度问题），所以选择在运行时生成地形（并缓存）。
 
-#####1：（BattleField 3）方案：
+##### 1：（BattleField 3）方案：
 ![![enter image description here](tflpictures202306tapd_30659243_1687335320_375.png)](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/!%5Benter%20image%20description%20here%5D(tflpictures202306tapd_30659243_1687335320_375.png).png)
 - 1:将因virtual texture过大而膨胀的Indirect Texture分成多个layer，采用Clipmap的方式让高精度的layer只有部分存在.（因为我们项目主要的问题在于包体，针对Indirection Texture的优化方案暂时没有裨益。）
 - 2:将地形混合后存入VT中，参照正常的VT管理策略进行管理。
 
-####2： （Far Cry 4）方案： Adaptive VT: 
+#### 2： （Far Cry 4）方案： Adaptive VT: 
 - 1：将VT分为相同大小的Sector。离相机近的sectors在Indirect Texture上可以获得更大的page（Virtual image, VI），从而在physical map上占据更多的pages。（在Indirection Texture仍然是每个texel对应physical texture上的一个tile，故更大的VI在physical map对应的面积越大）
 ![<!-- ![20230621104809](httpsraw.githubusercontent.comhwubhPicgoPicsmainimages20230621104809.png) -->
 ![enter image description here](tflpictures202306tapd_30659243_1687335417_326.png)](https://raw.githubusercontent.com/hwubh/hwubh_Pictures/main/%3C!--%20!%5B20230621104809%5D(httpsraw.githubusercontent.comhwubhPicgoPicsmainimages20230621104809.png)%20--%3E%0D%0A!%5Benter%20image%20description%20here%5D(tflpictures202306tapd_30659243_1687335417_326.png).png)
@@ -70,8 +70,12 @@
 <center>（这幅图可以看作时开放世界中相机正在远离，或者SLG俯视角时相机正在上升）</center>
 
 拾遗: 
+https://zhuanlan.zhihu.com/p/1928153095868768864
+
 ![20260512165138](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260512165138.png)
-- 虚拟贴图被分割成了大小相等的Page。虚拟贴图和索引贴图都是按照mipmap组织的，物理缓存没有mipmap层级，它会在不同的page中存储不同级别的mipmap贴图。
+<!-- - 虚拟贴图被分割成了大小相等的Page。虚拟贴图和索引贴图都是按照mipmap组织的，物理缓存没有mipmap层级，它会在不同的page中存储不同级别的mipmap贴图。 -->
+
+- RVT 中可以在绘制完 Physical Texture后，使用shader 对physical texture进行压缩？
 
 ###工程实践的补充：
 ####Texture Filtering：
@@ -93,10 +97,10 @@
 - 6：计算片元与pos的相对位移，根据uv梯度计算其大致对应的lod层。通过世界坐标与lod值计算对应的physical texture的uv值，采样Physical Texture。
 ![enter image description here](/tfl/pictures/202306/tapd_30659243_1687335627_370.png)
 
-####具体实现： 
+#### 具体实现： 
 #####1:TerrainVTFeature-》Create(): 
 - 生成TerrianVTPass, 该Pass在绘制阴影之前绘制。 WorldToCameraMatrix->使相机垂直大地图向下。 PorjectionMatrix 生成一个1/4的正交投影。
-- 生成TerrainVTGenerator 用于绘制地形。尺寸为1024*1024， （physical texture 为 2*2的规格，存储4层lod。？） center size为64？ 申请四张1024* 1024 的TempRT，分别对应Color，Height， Normal， Lightmap。
+- 生成TerrainVTGenerator 用于绘制地形。尺寸为1024\*1024， （physical texture 为 2\*2的规格，存储4层lod。？） center size为64？ 申请四张1024\* 1024 的TempRT，分别对应Color，Height， Normal， Lightmap。
 - 生成VirtualTextureAtlas，规格为2*2。 同样申请四张4096 *4096 的altas RT，分别对应Color，Height， Normal， Lightmap。其中color altas RT 在shader中声明为 “g_TerrainColorVT”
 - 生成四张VirtualTextureRT，每张的index对应altas RT上的一个block。每张的uv分别为（0，0）、（0， 0.5）， （0.5，0）、（0.5，0.5）.size为1024. 同时生成四个对应至四个block的viewport
 - 在Shader中声明四个变量："g_TerrainVTInfo" = （2，2，4，0）、“g_TerrainVTSize” = （64，512，0，0）、“g_TerrainVTCenter” = （0，0，0，1）、“g_TerrainRootPos” = （0，0，0）

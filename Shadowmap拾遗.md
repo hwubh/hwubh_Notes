@@ -4,15 +4,16 @@
   - Depth / Normal Bias:
   - 坡度偏移 (Slope-Scaled Bias): 根据表面与光线的夹角动态调整偏移量。表面越斜，偏移量越大。
   - 软阴影：
-    - PCF:
-    - PCSS
-    - VSM
-    - AVSM
-    - MSM
-    - ESM
+    - PCF:每个采样点先做深度比较，再对比较结果加权平均。
+    - PCSS：用平均遮挡深度和接收点深度估算半影宽度，再用这个宽度决定 PCF 核的大小。
+    - VSM: 分别过滤 z 和 z²，得到一阶矩 E[z] 和二阶矩 E[z²]。
+    - AVSM： 	每个 Shadow Map 像素存一条压缩的深度–透射率曲线 T(z)
+    - MSM： 	经典四矩 MSM 分别过滤 z、`z²`、`z³`、`z⁴`。
+    - ESM: 	过滤指数变换后的深度
 - Virtual Shadow Maps
   - Sliding Window： 复用上一帧已渲染的，只更新当前新的阴影内容 New Page。
-  - Wraparound / Toroidal Addressing： 记录相机矩阵的偏移量。将New Page记录到不需要的Page上，因为采样时New Page的坐标相较于原点来说是大于阴影贴图的覆盖的，可以取余（mod）阴影贴图的尺寸来得到正常的坐标。 -> 由于阴影贴图上是空间不连续的，没法使用硬件插值。![20260417164342](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260417164342.png)
+  - Wraparound / Toroidal Addressing： https://developer.nvidia.com/gpugems/gpugems2/part-i-geometric-complexity/chapter-2-terrain-rendering-using-gpu-based-geometry
+  记录相机矩阵的偏移量。将New Page记录到不需要的Page上，因为采样时New Page的坐标相较于原点来说是大于阴影贴图的覆盖的，可以取余（mod）阴影贴图的尺寸来得到正常的坐标。 -> 由于阴影贴图上是空间不连续的，没法使用硬件插值。![20260417164342](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260417164342.png)
     - 独立级联：对于不同精度要求可以通过划分不同的级联来改善。 不同的级联使用各自的Pagemap，其大小相同，对应到各自的Physical Texture上（或Texture Atlas上相同大小的块）。
     - Pagemap Mipmap: 
       - ![20260512165138](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260512165138.png)
@@ -80,6 +81,14 @@
 
 抖动：
 - 考虑用时域的方式来压低？
+
+# Contact Shadow:
+采样深度图，往光线反方向做ray marching，判断是否有接触。
+- 问题： 步长是一个固定值，它会跳过一些刚好在屏幕空间上很细的薄物体，导致产生锯齿、片状等问题
+  - 引入抖动，改变步长 -> 产生噪音。
+    - 使用TAA， 改善噪音。
+- 处理漏光
+- 增加细节阴影。其实有点像是SSAO了？
 
 ---------------
 - https://zhuanlan.zhihu.com/p/1986214133645984827

@@ -108,7 +108,8 @@ TBDR
       - StoreAndResolve（storeAndMultisampleResolve）: 写回未经过Resolve的MSAA图, 和写回Resolve后的非MSAA图到VRAM
         > 就两种操作，需要指定一张“普通的、非 MSAA 的纹理”来接收Resolve后的结果。
         > IOS上好像针对MSAA, Depth, Stencil有优化? 设置为MTLStorageMode.Memoryless时,不存在未经过Resolve的MSAA图. 采样点在Tile中确定, resolve后写回非MSAA图到VRAM. Depth/Stencil也可只存在于tile上?
-      > - **transaction elimination** （ARM）: 比较该Tile前一次和本次的渲染结果的 **循环冗余校验（CRC值）**, 判断Tile是否发生变化。如果相同，则认为二者没变化，不执行Stroe操作，将framebuffer写回VRAM。
+        > 做法应该是MSAA 设置为 memoryless, 然后使用 MultisampleResolve 只把 resolve后的RT写回 VRAM.
+      > **transaction elimination** （ARM）: 比较该Tile前一次和本次的渲染结果的 **循环冗余校验（CRC值）**, 判断Tile是否发生变化。如果相同，则认为二者没变化，不执行Stroe操作，将framebuffer写回VRAM。
       
 ![20260319155219](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260319155219.png)
 - Resource Storage Mode： 内存中的对象的被CPU和GPU的访问模式，通常有Shared，Private，Memoryless三种
@@ -201,11 +202,27 @@ TBDR
     - 善用单分量缩放与偏移 (Scale & Bias)
     - 避免过度使用括号， 常量合并。
 
-
 - RT Compression: 
   - UBWC: 
 
 - helper lane and Quad: https://zhuanlan.zhihu.com/p/1980020382640658379 https://www.intel.cn/content/dam/develop/external/us/en/documents/coarse-pixel-shading-516367.pdf https://www.khronos.org/blog/khronos-releases-maximal-reconvergence-and-quad-control-extensions-for-vulkan-and-spir-v https://docs.vulkan.org/spec/latest/chapters/shaders.html#shaders-derivative-operations https://docs.vulkan.org/spec/latest/chapters/shaders.html#shaders-quad-operations https://microsoft.github.io/DirectX-Specs/d3d/VariableRateShading.html
+  - Quad Group Operations： 执行OpGroupNonUniformQuadBroadcast，OpGroupNonUniformQuadSwap时，即使index指定的pixel是helper lane，也会触发 helper invocations 进行完整的调用以保证数值的正确。
+  - Derivative Operations: derivative 操作也会触发helper invocation.
+  - 
+  > coarse pixel本身视为一个lane，2*2 coarse pixel quad不会触发16个lane 调用。 
+
+- MSAA: 
+  - resolve:  \[C_{\text{像素}} = f\,C_{\text{前景}} + (1-f)\,C_{\text{背景}}\]
+   > 资源状态(barrier)切换时,会强制resolve. 
+  - Size: 因为每个采样点的颜色都需要保存.
+  - SHADING: 默认在像素中心, 中心在三角形外时, 使用外推; 可用使用 centroid/sample 偏移着色计算点的位置. 
+    - centroid: 取第一个被三角形覆盖的采样点. (采样点全部覆盖时, 着色点不会发生偏移)
+    - sample: 每个采样点各自进行着色计算, 混合策略不变, 每个sample 的权重相当.
+  - Depth Test: 也是逐采样点比较的.
+  - VRS
+    - resolve: 虽然多个像素公用一个着色计算结果，但是依旧是每个像素根据采样点计算覆盖率，然后各自计算resolve结果。
+    - centroid: 选择 coarse pixel中的一个被覆盖的采样点。
+    - DX12上不同挡位的MSAA能配合的VRS挡位不同。
 
 **这三个 helper 会执行 Shader 来提供求导所需的邻居数据，但不会输出可见像素。开启 VRS 2×2 后，helper 开销仍可能存在；对于只覆盖一个像素的小三角形，不能期待它把 4 次着色直接变成 1 次。**
 
