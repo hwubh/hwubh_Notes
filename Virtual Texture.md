@@ -120,7 +120,8 @@ https://zhuanlan.zhihu.com/p/1928153095868768864
 #####2：每移动1/8时重新烘焙，在平坦地面上跳变较为明显。
 ![enter image description here](/tfl/pictures/202306/tapd_30659243_1687335747_247.png)
 ![enter image description here](/tfl/pictures/202306/tapd_30659243_1687335797_566.png)
-
+- 贴花精度不够: 
+  - 三角洲中采用曲面细分的方式增加顶点精度的方式。
 
 ###项目方案：(待续)
 

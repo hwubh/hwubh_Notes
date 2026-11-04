@@ -222,7 +222,7 @@
         - Windowing： 给高阶因子乘以衰减因子。
         - Clamp: UE 取最强方向对面光照的光强度作为最小光强度，将最小光强度 clamp 到至少最强光的 5%。
   - 环境光的高光部分： IBL的环境高光： Radiance map ？ -> 反射探针？ split-sum来算不同粗糙度的？
-    - split-sum： 本质上相当于将 L\*DGF 拆分成了 L\*D + GF. 其中D在反射探针中一般使用 GGX 分布。 
+    - split-sum： 本质上相当于将 积分(L\*DGF) 拆分成了 积分(LD) * 积分（GF）. 其中D在反射探针中一般使用 GGX 分布。 
       - LD部分的计算示例: https://github.com/advancedfx/afx-unity-srp/blob/advancedfx/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl
         ``` C
         real4 IntegrateLD(TEXTURECUBE_PARAM(tex, sampl),
@@ -342,7 +342,10 @@
         }
         ``` 
     - 误差： 高光技术拆分为两个可以预积分部分你的误差。（左边是表示各个方向光照的辐照度汇总, 右边是BRDF的汇总）， 和假设 N = R = V的误差。
-    - BRDF项的积分结果可以使用近似函数代替。(模拟G*F)
+    - BRDF项的积分结果可以使用近似函数代替。(模拟G*F)：
+      > Prefiltered environmentmap = 反射方向接受到的环境高光； BRDF: “这个平均环境高光要反射多少”？ 
+    - 使用球谐函数模拟Glossy反射: 把预积分后的 glossy 反射，表示成两个“球谐函数求值后取指数”的乘积. 利用指数空间的加减来模拟粗糙度变化吗？
+      > https://arisilvennoinen.github.io/Publications/HPG_2025_CRC.pdf 粗糙度 < 0.25 不适用。
   - 环境光遮蔽/AO: 
     - Baking AO： 烘焙到贴图或顶点上。
       - 烘培进lightmap： （技术镜面反射时）可以通过当前采样点的lightmap亮度/环境平均亮度 算出遮挡比例，用于把采样反射探针得到的高光信息也按比例遮挡。

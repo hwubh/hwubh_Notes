@@ -47,7 +47,26 @@
       - 逻辑较为复杂，Physical Texture之间不是空间连续的，不能使用硬件双线性插值？ -》 可以各个Slot单独加个Padding？
       - Pagemap 使用 Texture2DArray 或者一个巨大的 Linked List / Buffer 保留。 需要进行寻址查询。
   - UE VSM:
-    - shadowmap资源管理：平行光使用Clipmap； 聚光源使用带有Mipmap chain的VSM； 点光源六个面各自对应一张VSM。
+    - shadowmap资源管理：
+      - 平行光使用Clipmap； 
+      - 聚光源使用带有Mipmap chain的VSM； 
+      - 点光源六个面各自对应一张VSM。
+    - 流程：
+      - Page收集：
+        - 根据像素与相机之间的距离来计算合适的Clipmap层级。
+        - 根据像素的光源空间位置，计算在VT上的UV，所在的Page。
+      - 阴影绘制：走Nanite的流程，尽可能减少渲染的片元数量。
+        - Intance cull： 每一级VT都需要进行剔除判断，然后记录该instance 在哪几个视锥体上存在。
+        - Cluster cull: 根据instance所在的clipmap级别，选取对应级别的ClusterLOD。然后进行cluster剔除。
+        - 光栅化（后）计算各个三角形读取 indirection table（页表）找到physical texture位置，更新深度。
+      - Page处理: 每帧在收集到屏幕上像素所需的所有Page之后，这些Page大致分以下几种情况：
+        - 新出现的Page，需要为其分配物理空间并绘制
+        - 已经缓存了的Page，但其上物体发生变化，需要重新绘制
+        - 已经缓存了的Page且其上物体没有变化，不需要绘制
+        - 与instance/cluster与需要更新的page进行覆盖测试时，使用Page的HIZ优化计算效率，HIZ只存Flags信息（标注是否需要更新）。
+      - LRU Page： 分配新page，先取空的，如果没有空的，取LRU Page。 RequestPage不能用（正被使用的page）。
+      - Clipmap更新： 相机移动时，Clipmap也会跟着移。Clipmap移动后，page需要更新其在PageTable上的位置，以保持PageTable的空间连续性。
+      - 动静分离： 静态物体阴影和动态物体阴影分开绘制，阴影绘制完成后将静态物体阴影叠加到动态物体阴影图上。优势是更新阴影时只需要
     - 平行光： 
       - 最多分为22级Mipmap。
       - 投影矩阵： 覆盖直径作为平行投影的 width、height，半径的一半作为矩阵的 z near，z far 则固定为 0.5。
@@ -82,15 +101,23 @@
 抖动：
 - 考虑用时域的方式来压低？
 
-# Contact Shadow:
+# Screen Space shadowmap: https://zhuanlan.zhihu.com/p/45679584
+- 使用屏幕空间下的shadowmap替代光源空间下的，多用于延迟渲染。
+- 屏幕空间做一次阴影收集计算（Shadows Collector）: 得到一张屏幕空间阴影纹理（只记录了比较结果）. 通过间深度图中深度图变换到光源空间中，采样shadowmap进行比较，将结果写入屏幕空间阴影贴图中。
+- pros: 
+  - 不需要用cascade shadow的？不用binding太多shadowmap 纹理？
+  - PCF这些可以每个像素只跑一次？
+
+# Contact Shadow:  https://zhuanlan.zhihu.com/p/357280024
 采样深度图，往光线反方向做ray marching，判断是否有接触。
 - 问题： 步长是一个固定值，它会跳过一些刚好在屏幕空间上很细的薄物体，导致产生锯齿、片状等问题
   - 引入抖动，改变步长 -> 产生噪音。
     - 使用TAA， 改善噪音。
+    - 基于深度差的联合双边滤波方案: 
 - 处理漏光
 - 增加细节阴影。其实有点像是SSAO了？
 
-# 原神中优化阴影的一些技巧：
+# 原神中优化阴影的一些技巧： https://zhuanlan.zhihu.com/p/56317663
 - 使用Poisson disc（泊松分布算法）的soft shadow（软阴影）
 - 分为8级cascade，后面四级不每帧更新
 - 1/4 * 1/4 大小的Mask标注半影区域，只有半影区域做软阴影。 通过在4*4 coarse pixel中选取几个点判断是否有阴影。Mask会有模糊以弥补判断半阴影时欠采样的问题。
@@ -101,8 +128,30 @@
     - 每个2\*2块如果是落在同一平面上，则可以使用深度平面方程\[z(x,y)=ax+by+c\]表示。
     - 每个2\*2块如果被不同平面分割，则使用压缩浮点数的方式压缩四个深度值。
     - 每个Tile使用Quad tile，合并同一平面上的coarse pixel（可以共用深度平面方程？）
+    - https://zhuanlan.zhihu.com/p/388563845 中还将空白tile剔除掉了，后续解压的shadowmap打成了图集。
 
-https://zhuanlan.zhihu.com/p/56317663
+# Distance Field Shadow https://zhuanlan.zhihu.com/p/683779588
+先生成一张光空间深度图，而是从当前像素出发，沿光线方向做一段追踪，靠距离场数据判断中途是否撞上遮挡物。
+- 根据SDF确定步进长度
+  > SDF(P) 表示点P离最近的三角形的距离。
+- 沿向光源方向进行步进，到$P_0$. $SDF(P_0)$ 得到 $P_0$ 的**安全距离**。根据安全距离，原点P 计算得到**安全角度** $arcsin(\frac{SDF(P_0)}{(P_0) - (P)})$.
+  >  $arcsin(\frac{SDF(P_0)}{(P_0) - (P)})$ 可以约分为 $min(\frac{k*SDF(P_0)}{(P_0) - (P)}, 1.0)$ k为手动调整的系数
+- 根据步进路上最小的安全角度判断阴影可见度，实现软阴影。
+- pros:
+  - DFSS的速度和效果是要好于多级的级联阴影贴图（如果只想用1级，那还是级联阴影贴图速度快）
+  - 完全没有shadow acne和peter panning的问题
+- cons: 
+  - SDF的数据需要占据一定的内存
+  - 如果动态物体也使用SDF的话，需要一定开销来组织数据（动态添加和剔除）
+- UE优化:
+  - 不会对整个场景生成SDF，而只是为单个模型生成SDF(纹理大小控制在128 x 128 x 128)。全局距离场使用多个 clipmap 体积纹理。
+  - 渲染时将像素点的世界位置与灯光连线，找到和哪些物体发生碰撞，然后再依次读取这些物体的SDF
+  - 静态物体和动态物体的SDF分开管理（但最终还是整合到一个3D纹理中），以减少动态物体的开销. 只更新动态物体自身的SDF 和 全局SDF中动态物体移动前后位置的SDF。
+
+# Dual Paraboloid Shadow Maps(DPSM): https://zhuanlan.zhihu.com/p/55218272
+- 双抛物面：把每个半球的方向，通过非线性映射压到一个圆盘，两个圆盘分别存进两张 2D shadow map。
+- 使用时在shader中映射回来。
+> 有点像是画地图？ 
 ---------------
 - https://zhuanlan.zhihu.com/p/1986214133645984827
 - https://zhuanlan.zhihu.com/p/2030698173631554239
