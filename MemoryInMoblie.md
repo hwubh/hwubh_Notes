@@ -56,16 +56,18 @@ Nanite:
   - EmitDepthTargets: 生成Depth 相关的 Scene Depth、Stencil、Velocity、Material Depth 等 Buffer
   - BasePass: G-Buffer
   - Shadows: VSM需要的Detph
+  - Deferred Lighting
   - Readback： 回读在 PersistentCull pass 中产生的 Cluster Page Request 数据。
 - Visible Buffer： RG32格式，R通道7bit存InstanceID，25bit存VertexID。 G通道存depth。 Material信息存在另外的 Material depth buffer中。
   - InstanceCull: 以Mesh为单位的culling。 
   - PersistentCull: 以cluster为单位的culling。 先通过Mesh的BVH进行层次性剔除，然后使用生产者-消费者模式剔除队列中的Node。 线程从FIFO任务队列总取Node进行剔除，通过剔除的节点的四个子节点加入到队列的末尾。 线程即作为生成，也作为消费者。 最后的叶节点如果也通过了的话，加入到Cluster List中。
+  > 一般来说是一个线程负责一个Instance/Cluster。 一个线程组一次消费 64 个 Instance/Cluster。 队列存储在全局内存，可以跨groupthread进行访问。
   - 光栅化:
     - 硬件光栅化: 大三角形和非Nanite Mesh。
       > 小三角形容易造成Quad Overdraw？
-    - 软件光栅化： 小三角形使用Compute Shader写成的软光栅化； 每个Cluster对应一个线程组， 先算出所有顶点的剪裁空间坐标存入Shared Memory中。 然后每个线程读取对应三角形的Index Buffer和变换后的Vertex Position，根据Vertex Position计算出三角形的边，执行背面剔除和小三角形（小于一个像素）剔除，然后利用原子操作完成Z-Test，并将数据写进Visibility Buffer。
+    - 软件光栅化： 小三角形使用Compute Shader写成的软光栅化； 每个Cluster对应一个线程组， 先算出所有顶点的剪裁空间坐标存入Shared Memory中。 然后每个线程读取对应三角形的Index Buffer和变换后的Vertex Position，根据Vertex Position计算出三角形的边，执行背面剔除和小三角形（没有覆盖着色/采样点的）剔除，然后利用原子操作完成Z-Test，并将数据写进Visibility Buffer。
       > Nanite Mesh 不支持顶点位置会发生变化，带有Mask的Mesh
-      > 区分“大三角形”和“小三角形”：三角形在屏幕上的投影大小。如果包围盒在任一轴向上的尺寸小于阈值，该三角形就被归为“小三角形”。
+      > 区分“大三角形”和“小三角形”：Cluster在屏幕上的投影大小。如果包围盒在任一轴向上的尺寸小于阈值，该Cluster就被归为“小三角形”。
   - EmitDepthTargets: 
     - Nanite Mask: 计算当前像素是否是Nanite Mesh
     - Scene Depth Buffer: 根据Nanite Mask将Visible buffer 写入场景的 depth buffer中
@@ -77,6 +79,13 @@ Nanite:
           - 逐材质绘制其Tile列表的各个Tile，并使用 Material Depth剔除无效像素，只对有效像素进行着色。
   - 使用Visibility Buffer记录当前像素实际使用的顶点，深度，材质数据，避免G-Buffer的带宽消耗。
     - 维护一个全局的顶点数据和材质贴图表：着色计算时，从顶点数据中根据InstanceID和VertexID获取顶点属性。使用Barycentric Coord 插值顶点属性。 使用materialID获取材质信息。
+
+# Unity GPU-Driven Pipeline
+- 与UE的不同:
+  - 没有软光栅
+  - 顶点缓存（VG Vertex Cache）：用 compute 预计算可见 cluster 的顶点（顶点变换后的结果写入哈希表管理的缓存里），VBuffer、GBuffer、VSM 多个 pass 复用。
+  - VertexID -> Material ID 的跳转多一层。
+  - 不支持Compute shader着色。
 
 Mesh Shader: 在硬件层面实现Visible Buffer的计算？ 替代了“Input Assembler → Vertex Shader → Hull Shader → Tessellator → Domain Shader → Geometry Shader ”
 > 可用于GPU skinning / Virtual Geometry? 

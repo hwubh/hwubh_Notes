@@ -87,7 +87,7 @@
         - 结果写入VSM专用的Visible buffer，因为需要储存Page索引，会比一般的Visible buffer多使用32位。
       - Virtual Address Translation: 从Vuv 到 Puv的调整方式。
         - 软光栅：
-          - Per Pixel:  没有 vPage 字段; Rasterization 最终写入像素时（WritePixel 函数）通过 VirtualToPhysicalTexel 函数将虚拟地址转换为物理地址，再将光栅化的 Depth 写入到 Physical Page 中
+          - Per Pixel: 没有 vPage 字段; Rasterization 最终写入像素时（WritePixel 函数）通过 VirtualToPhysicalTexel 函数将虚拟地址转换为物理地址，再将光栅化的 Depth 写入到 Physical Page 中
           - Per Page: 有 vPage 字段; 用vPage从 Pagemap上查表。
         - 硬光栅: 一次渲染16个Page，为了并行考虑； 可能导致一个Cluster被多个窗体提交，光栅化，导致浪费。
 多层纹理混合地面使用 ID Tex控制地貌，因为ID Tex本身精度问题导致的Block Artifacts怎么处理：

@@ -14,6 +14,7 @@ Warp/Wavefront/SIMD-group :
     Quad 中的 lane都是active的，但是对最终渲染结果没贡献的成为Help Lane （help pixel？），同一Wrap能可能存在整个Quad没跟三角形相交导致的Inactive？![20260727154641](https://raw.githubusercontent.com/hwubh/Temp-Pics/main/20260727154641.png)
     > Quad 在Compute shader中时线性布局。
     > 我自己试下来 quad中 lane 是不是 active是GPU决定的？ DX12上用hlsl写，fxc编译，ddx_fine ddy_fine 很多时候是没有输出的。 https://microsoft.github.io/DirectX-Specs/d3d/HLSL_SM_6_7_QuadAny_QuadAll.html
+    > 实际是DXC 编译问题
 
 Wave Intrincis (DX12)
 - def: 内置函数，专用于控制 warp 的 lane 间共享和同步数据. 
